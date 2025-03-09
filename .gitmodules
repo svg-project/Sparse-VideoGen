@@ -1,0 +1,9 @@
+[submodule "svg/kernels/3rdparty/cutlass"]
+	path = svg/kernels/3rdparty/cutlass
+	url = https://github.com/NVIDIA/cutlass.git
+[submodule "svg/kernels/3rdparty/flashinfer"]
+	path = svg/kernels/3rdparty/flashinfer
+	url = https://github.com/flashinfer-ai/flashinfer.git
+[submodule "svg/kernels/3rdparty/pybind"]
+	path = svg/kernels/3rdparty/pybind
+	url = https://github.com/pybind/pybind11.git
