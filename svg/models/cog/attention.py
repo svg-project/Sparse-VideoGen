@@ -13,11 +13,36 @@ from .placement import sparse_head_placement, hidden_states_placement, ref_spars
 from .utils import generate_temporal_head_mask_mod, create_block_mask_cached
 
 try:
-    sys.path.append('kernels/build/')
+    sys.path.append('svg/kernels/build/')
     import _kernels
+
+    def qk_norm(attn, query, key):
+        if attn.norm_q is not None:
+            _kernels.layer_norm_forward(query.view(-1, query.shape[-1]), attn.norm_q.weight, attn.norm_q.bias)
+        if attn.norm_k is not None:
+            _kernels.layer_norm_forward(key.view(-1, key.shape[-1]), attn.norm_k.weight, attn.norm_k.bias)
+        return query, key
+
+    def rotary_emb(image_rotary_emb, query, key, text_seq_length):
+        cos, sin = image_rotary_emb
+        _kernels.apply_qk_rope_inplace_cossin(query, key, cos, sin, text_seq_length)
+        return query, key
+
 except ImportError:
     import warnings
     warnings.warn("Could not import RoPE / Norm kernels! Falling back to PyTorch implementation.")
+
+    def qk_norm(attn, query, key):
+        if attn.norm_q is not None:
+            query = attn.norm_q(query)
+        if attn.norm_k is not None:
+            key = attn.norm_k(key)
+        return query, key
+
+    def rotary_emb(image_rotary_emb, query, key, text_seq_length):
+        query[:, :, text_seq_length:] = apply_rotary_emb(query[:, :, text_seq_length:], image_rotary_emb)
+        key[:, :, text_seq_length:] = apply_rotary_emb(key[:, :, text_seq_length:], image_rotary_emb)
+        return query, key
 
 
 
@@ -48,32 +73,6 @@ class CogVideoX_SparseAttn_Processor2_0:
         self.layer_idx = layer_idx
         if not hasattr(F, "scaled_dot_product_attention"):
             raise ImportError("CogVideoXAttnProcessor requires PyTorch 2.0, to use it, please upgrade PyTorch to 2.0.")
-    
-    def qk_norm(self, attn, query, key):
-        if attn.norm_q is not None:
-            query = attn.norm_q(query)
-        if attn.norm_k is not None:
-            key = attn.norm_k(key)
-        return query, key
-
-    def fast_qk_norm(self, attn, query, key):
-        if attn.norm_q is not None:
-            # query_out = torch.empty_like(query)
-            _kernels.layer_norm_forward(query.view(-1, query.shape[-1]), attn.norm_q.weight, attn.norm_q.bias)
-        if attn.norm_k is not None:
-            # key_out = torch.empty_like(key).contiguous()
-            _kernels.layer_norm_forward(key.view(-1, key.shape[-1]), attn.norm_k.weight, attn.norm_k.bias)
-        return query, key
-
-    def image_rotary_emb(self, image_rotary_emb, query, key, text_seq_length):
-        query[:, :, text_seq_length:] = apply_rotary_emb(query[:, :, text_seq_length:], image_rotary_emb)
-        key[:, :, text_seq_length:] = apply_rotary_emb(key[:, :, text_seq_length:], image_rotary_emb)
-        return query, key
-    
-    def fast_image_rotary_emb(self, image_rotary_emb, query, key, text_seq_length):
-        cos, sin = image_rotary_emb
-        _kernels.apply_qk_rope_inplace_cossin(query, key, cos, sin, text_seq_length)
-        return query, key
 
     def get_qkv(self, attn, hidden_states):
         query = attn.to_q(hidden_states)
@@ -228,11 +227,9 @@ class CogVideoX_SparseAttn_Processor2_0:
         query, key, value = self.get_qkv(attn, hidden_states)
         query, key, value, head_dim = self.transpose_qkv(attn, query, key, value, batch_size)
 
-        query, key = self.qk_norm(attn, query, key)
-        # query, key = self.fast_qk_norm(attn, query, key)
+        query, key = qk_norm(attn, query, key)
 
-        query, key = self.image_rotary_emb(image_rotary_emb, query, key, text_seq_length)
-        # query, key = self.fast_image_rotary_emb(image_rotary_emb, query, key, text_seq_length)
+        query, key = rotary_emb(image_rotary_emb, query, key, text_seq_length)
         
         # ========================================================================
         hidden_states = self.attention_core_logic(query, key, value, timestep)
