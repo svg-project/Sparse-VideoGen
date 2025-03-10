@@ -76,11 +76,42 @@ if __name__ == "__main__":
 
         def get_attention_mask(version, mask_name):
 
+            context_length = 256
+            num_frame = 33
+            frame_size = 3600
+            attention_mask = torch.zeros((context_length + num_frame * frame_size, context_length + num_frame * frame_size), device="cpu")
+
             # TODO: fix hard coded mask
             if mask_name == "spatial":
-                attention_mask = torch.load(f"/data/home/xihaocheng/andy_develop/tmp_data/hunyuanvideo/I2VSparse/sparseattn/v5/mask_tensor/mask_spatial.pt", map_location="cpu")
+                pixel_attn_mask = torch.zeros_like(attention_mask[:-context_length, :-context_length], dtype=torch.bool, device="cpu")
+                block_size, block_thres = 128, frame_size * 1.5
+                num_block = math.ceil(num_frame * frame_size / block_size)
+                for i in range(num_block):
+                    for j in range(num_block):
+                        if abs(i - j) < block_thres // block_size:
+                            pixel_attn_mask[i * block_size : (i + 1) * block_size, j * block_size : (j + 1) * block_size] = 1
+                attention_mask[:-context_length, :-context_length] = pixel_attn_mask
+
+                attention_mask[-context_length:, :] = 1
+                attention_mask[:, -context_length:] = 1
+                # attention_mask = torch.load(f"/data/home/xihaocheng/andy_develop/tmp_data/hunyuanvideo/I2VSparse/sparseattn/v5/mask_tensor/mask_spatial.pt", map_location="cpu")
+
             else:
-                attention_mask = torch.load(f"/data/home/xihaocheng/andy_develop/tmp_data/hunyuanvideo/I2VSparse/sparseattn/v5/mask_tensor/mask_temporal.pt", map_location="cpu")
+                pixel_attn_mask = torch.zeros_like(attention_mask[:-context_length, :-context_length], dtype=torch.bool, device=device)
+
+                block_size, block_thres = 128, frame_size * 1.5
+                num_block = math.ceil(num_frame * frame_size / block_size)
+                for i in range(num_block):
+                    for j in range(num_block):
+                        if abs(i - j) < block_thres // block_size:
+                            pixel_attn_mask[i * block_size : (i + 1) * block_size, j * block_size : (j + 1) * block_size] = 1
+
+                pixel_attn_mask = pixel_attn_mask.reshape(frame_size, num_frame, frame_size, num_frame).permute(1, 0, 3, 2).reshape(frame_size * num_frame, frame_size * num_frame)
+                attention_mask[:-context_length, :-context_length] = pixel_attn_mask
+
+                attention_mask[-context_length:, :] = 1
+                attention_mask[:, -context_length:] = 1
+                # attention_mask = torch.load(f"/data/home/xihaocheng/andy_develop/tmp_data/hunyuanvideo/I2VSparse/sparseattn/v5/mask_tensor/mask_temporal.pt", map_location="cpu")
             attention_mask = attention_mask[:args.sample_mse_max_row].cuda()
             return attention_mask
 

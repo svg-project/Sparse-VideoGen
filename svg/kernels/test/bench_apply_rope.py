@@ -1,5 +1,5 @@
 import sys
-sys.path.append('/home/andy/I2VSparse/kernels/build/')
+sys.path.append('/ssd/data/xihaocheng/Hunyuan/I2VSparse/kernels/build/')
 
 import _kernels
 

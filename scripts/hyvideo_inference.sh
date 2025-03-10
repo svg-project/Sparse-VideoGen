@@ -11,7 +11,7 @@ do
     do
         for sample_row in 64
         do
-            CUDA_VISIBLE_DEVICES=3 python3 hyvideo_inference.py \
+            CUDA_VISIBLE_DEVICES=1 python3 hyvideo_inference.py \
                 --video-size 720 1280 \
                 --video-length 129 \
                 --infer-steps 50 \

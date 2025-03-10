@@ -8,7 +8,7 @@ from itertools import product
 from typing import List
 
 
-def bench_layer_norm(
+def bench_rms_norm(
     param,
     ln_func,
     iter_warmup: int = 10,
@@ -18,10 +18,9 @@ def bench_layer_norm(
     for batch_size, head_dim in param:
         input = torch.randn(batch_size, head_dim, dtype=torch.float16).cuda()
         gemma = torch.randn(head_dim, dtype=torch.float16).cuda()
-        beta = torch.randn(head_dim, dtype=torch.float16).cuda()
         
         for _ in range(iter_warmup):
-            ln_func(input, gemma, beta)
+            ln_func(input, gemma)
             
         local_time_list = []
         for _ in range(iter_total):
@@ -29,7 +28,7 @@ def bench_layer_norm(
             start = torch.cuda.Event(enable_timing=True)
             end = torch.cuda.Event(enable_timing=True)
             start.record()
-            ln_func(input, gemma, beta)
+            ln_func(input, gemma)
             end.record()
             torch.cuda.synchronize()
             local_time_list.append(start.elapsed_time(end))
@@ -40,23 +39,21 @@ def bench_layer_norm(
 def ref_torch_impl(
     input,
     gemma,
-    beta,
 ) -> torch.Tensor:
-    return torch.nn.functional.layer_norm(input, [input.size(-1)], gemma, beta, 1e-5)
+    return torch.nn.functional.rms_norm(input, [input.size(-1)], gemma, 1e-5)
 
 def ref_narrow_impl(
     input,
     gemma,
-    beta
 ) -> torch.Tensor:
-    _kernels.layer_norm_forward(input, gemma, beta)
+    _kernels.rms_norm_forward(input, gemma)
     return input
 
 num_total_loading = 4096*16*1024
 # parameters = list(product([65536], [64,128,256,512]))
 parameters= [(num_total_loading // x, x) for x in [32,64,128,256]]
-torch_time = bench_layer_norm(parameters, ref_torch_impl)
-narrow_time = bench_layer_norm(parameters, ref_narrow_impl)
+torch_time = bench_rms_norm(parameters, ref_torch_impl)
+narrow_time = bench_rms_norm(parameters, ref_narrow_impl)
 
 assert len(torch_time) == len(parameters)
 assert len(narrow_time) == len(parameters)

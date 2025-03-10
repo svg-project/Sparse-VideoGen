@@ -13,7 +13,7 @@ def assert_close(a, b):
         torch.bfloat16: (3e-2, 2e-2),
     }[a.dtype]
     torch.testing.assert_close(a, b, rtol=rtol, atol=atol)
-        
+            
 def different_proportion(a, b):
     return torch.sum(a != b).item() / a.numel()
     
@@ -43,19 +43,19 @@ def test_apply_rope(bsz, num_heads, total_seq_len, head_dim, len_text_prompt):
     cos = torch.randn(valid_seq_len, head_dim, dtype=torch.float32).cuda()
     sin = torch.randn(valid_seq_len, head_dim, dtype=torch.float32).cuda()
     
-    q_image_host = ref_host_apply_rope(q[:,:,len_text_prompt:,:], cos, sin)
-    k_image_host = ref_host_apply_rope(k[:,:,len_text_prompt:,:], cos, sin)
-    q_text_host = q[:,:,:len_text_prompt,:].clone()
-    k_text_host = k[:,:,:len_text_prompt,:].clone()
+    q_image_host = ref_host_apply_rope(q[:,:,:-len_text_prompt,:], cos, sin)
+    k_image_host = ref_host_apply_rope(k[:,:,:-len_text_prompt,:], cos, sin)
+    q_text_host = q[:,:,-len_text_prompt:,:].clone()
+    k_text_host = k[:,:,-len_text_prompt:,:].clone()
     
-    _kernels.apply_qk_rope_inplace_cossin(q, k, cos, sin, len_text_prompt)
+    _kernels.apply_qk_rope_inplace_cossin_txtlast(q, k, cos, sin, len_text_prompt)
     
-    assert_close(q[:,:,len_text_prompt:,:], q_image_host)
-    assert_close(k[:,:,len_text_prompt:,:], k_image_host)
-    assert_close(q[:,:,:len_text_prompt,:], q_text_host)
-    assert_close(k[:,:,:len_text_prompt,:], k_text_host)
+    assert_close(q[:,:,:-len_text_prompt:,:], q_image_host)
+    assert_close(k[:,:,:-len_text_prompt:,:], k_image_host)
+    assert_close(q[:,:,-len_text_prompt:,:], q_text_host)
+    assert_close(k[:,:,-len_text_prompt:,:], k_text_host)
     
-    print(f"{different_proportion(q[:,:,len_text_prompt:,:], q_image_host) * 100:.4f}% elements are different for q_image_host")
-    print(f"{different_proportion(k[:,:,len_text_prompt:,:], k_image_host) * 100:.4f}% elements are different for k_image_host")
-    print(f"{different_proportion(q[:,:,:len_text_prompt,:], q_text_host) * 100:.4f}% elements are different for q_text_host")
-    print(f"{different_proportion(k[:,:,:len_text_prompt,:], k_text_host) * 100:.4f}% elements are different for k_text_host")
+    print(f"{different_proportion(q[:,:,:-len_text_prompt:,:], q_image_host) * 100:.4f}% elements are different for q_image_host")
+    print(f"{different_proportion(k[:,:,:-len_text_prompt:,:], k_image_host) * 100:.4f}% elements are different for k_image_host")
+    print(f"{different_proportion(q[:,:,-len_text_prompt:,:], q_text_host) * 100:.4f}% elements are different for q_text_host")
+    print(f"{different_proportion(k[:,:,-len_text_prompt:,:], k_text_host) * 100:.4f}% elements are different for k_text_host")
