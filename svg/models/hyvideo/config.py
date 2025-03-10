@@ -385,13 +385,6 @@ def add_parallel_args(parser: argparse.ArgumentParser):
 
 def add_sparsity_args(parser: argparse.ArgumentParser):
     group = parser.add_argument_group(title="Sparsity")
-
-    group.add_argument(
-        "--t2v_file_idx", 
-        type=int, 
-        default=None, 
-        help="Which prompt are we going to use"
-    )
     
     # ======================== Model loads ========================
     group.add_argument(
@@ -407,20 +400,14 @@ def add_sparsity_args(parser: argparse.ArgumentParser):
         choices=["v5"], 
         help="Random seed for reproducibility"
     )
-    # group.add_argument(
-    #     "--file_idx", 
-    #     type=int, 
-    #     required=True, 
-    #     help="The index of the VBench Sample"
-    # )
     group.add_argument(
-        "--first_layers_fp", 
-        type=float, 
-        default=0.0, 
-        help="Only works for best config. Leave the 0, 1, 2, 40, 41 layers in FP"
+        "--output_path", 
+        type=str, 
+        required=True, 
+        help="Save the output video"
     )
     group.add_argument(
-        "--last_layers_fp", 
+        "--first_layers_fp", 
         type=float, 
         default=0.0, 
         help="Only works for best config. Leave the 0, 1, 2, 40, 41 layers in FP"
@@ -440,25 +427,8 @@ def add_sparsity_args(parser: argparse.ArgumentParser):
         "--pattern", 
         type=str, 
         required=True, 
-        choices=["dense", "fast_sample_mse", "SVG"], 
+        choices=["dense", "SVG"], 
         help="Sparse Pattern"
-    )
-    group.add_argument(
-        "--masks", 
-        type=str, 
-        action="append",
-        choices=[
-            "sparsev0", "sparsev1", "sparsev2", "sparsev3", "sparsev4", "sparsev5", \
-            "sparsev6", "sparsev7", "sparsev8", "sparsev9", "sparsev10", "sparsev11", \
-            "sparsev12", "sparsev13", "sparsev14"
-        ],
-        help="Sparse Attention Masks for best config, sample attention, and sample mse"
-    )
-    group.add_argument(
-        "--budget", 
-        type=float, 
-        default=0.4, 
-        help="The budget for oracle sparse pattern"
     )
     group.add_argument(
         "--num_sampled_rows", 
@@ -471,24 +441,6 @@ def add_sparsity_args(parser: argparse.ArgumentParser):
         type=int, 
         default=10000, 
         help="Since some attention masks are really large, need to restrict the maximum size (the row we are going to sample on)."
-    )
-    group.add_argument(
-        "--threshold", 
-        type=float, 
-        default=0.8, 
-        help="The threshold for using sampling mask"
-    )
-    group.add_argument(
-        "--multiplier",
-        type=float,
-        default=0.0,
-        help="The width of the striped attention pattern. Accepts one or two float values. Only effective for fast_sample_mse"
-    )
-    group.add_argument(
-        "--diag_width",
-        type=int,
-        default=1,
-        help="The width of the tridiagonal attention pattern. Only effective for fast_sample_mse"
     )
     parser.add_argument(
         "--sparsity",
@@ -525,22 +477,6 @@ def add_sparsity_args(parser: argparse.ArgumentParser):
         type=float, 
         default=0.0, 
         help="Only works for best config. Leave the 0, 1, 2, 40, 41 layers in FP"
-    )
-    
-    group.add_argument(
-        "--debug_only_spatial",
-        action="store_true",
-        help="Enable tiling for the VAE model to save GPU memory.",
-    )    
-    group.add_argument(
-        "--debug_only_temporal",
-        action="store_true",
-        help="Enable tiling for the VAE model to save GPU memory.",
-    )    
-    group.add_argument(
-        "--minference",
-        action="store_true",
-        help="Enable tiling for the VAE model to save GPU memory.",
     )
     return parser
 

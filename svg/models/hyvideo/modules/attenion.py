@@ -1,9 +1,14 @@
-import importlib.metadata
 import math
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.attention.flex_attention import flex_attention
+
+from flash_attn.flash_attn_interface import flash_attn_varlen_func
+
+
+from .utils import create_block_mask_cached, generate_temporal_head_mask_mod
+from .placement import hunyuan_sparse_head_placement, hunyuan_hidden_states_placement, ref_hunyuan_sparse_head_placement, ref_hunyuan_hidden_states_placement 
 
 try:
     import flash_attn
@@ -13,6 +18,11 @@ except ImportError:
     flash_attn = None
     flash_attn_varlen_func = None
     _flash_attn_forward = None
+
+
+flex_attention = torch.compile(flex_attention, dynamic=False)
+torch._dynamo.config.cache_size_limit = 192 * 3
+torch._dynamo.config.accumulated_cache_size_limit = 192 * 3
 
 
 MEMORY_LAYOUT = {
@@ -33,6 +43,110 @@ MEMORY_LAYOUT = {
         lambda x: x.transpose(1, 2),
     ),
 }
+
+class Hunyuan_SparseAttn:
+    num_sampled_rows = 32
+    attention_masks = None
+    version = None
+
+    context_length = 256
+    num_frame = 33
+    frame_size = 3600
+
+    sample_mse_max_row = 10000
+    block_mask = None
+    
+
+    def __init__(self):  
+        if not hasattr(F, "scaled_dot_product_attention"):
+            raise ImportError("Hunyuan_SparseAttn requires PyTorch 2.0, please upgrade PyTorch.")
+
+    def sample_mse(self, query, key, value):
+        assert len(self.attention_masks) == 2
+
+        cfg, num_heads, seq_len, dim = query.size()
+        num_sampled_rows = min(self.num_sampled_rows, seq_len)
+        sampled_rows = torch.randint(low=0, high=self.sample_mse_max_row, size=(num_sampled_rows,))
+        sampled_q = query[:, :, sampled_rows, :]
+        sampled_qk_scores = torch.matmul(sampled_q, key.transpose(-2, -1)) / (dim**0.5)
+    
+        sampled_attn_weights = F.softmax(sampled_qk_scores, dim=-1)
+        sampled_golden_hidden_states = torch.matmul(sampled_attn_weights, value)  # (1, seq_len, dim)
+
+        sampled_mses = torch.zeros(len(self.attention_masks), cfg, num_heads, device=query.device, dtype=query.dtype)
+
+        # Only have Tri-diagonal and Striped
+        for mask_idx, attn_mask in enumerate(self.attention_masks):
+            sampled_attention_mask = attn_mask[sampled_rows, :]
+            sampled_attention_scores = sampled_qk_scores.masked_fill(sampled_attention_mask == 0, float('-inf'))
+            sampled_attn_weights = F.softmax(sampled_attention_scores, dim=-1)
+            sampled_hidden_states = torch.matmul(sampled_attn_weights, value)
+            mse = torch.mean((sampled_hidden_states - sampled_golden_hidden_states) ** 2, dim=(2, 3))
+            sampled_mses[mask_idx] = mse
+
+        return sampled_mses
+
+    def sparse_flex_attention(self, query, key, value, block_mask):
+        return flex_attention(query, key, value, block_mask=block_mask)
+
+    def sparse_head_placement(self, query, key, value, query_out, key_out, value_out, best_mask_idx, context_length, num_frame, frame_size):
+        
+        query_out, key_out, value_out = ref_hunyuan_sparse_head_placement(query, key, value, best_mask_idx, context_length, num_frame, frame_size)
+
+        return query_out, key_out, value_out
+
+    def fast_sparse_head_placement(self, query, key, value, query_out, key_out, value_out, best_mask_idx, context_length, num_frame, frame_size):
+
+        hunyuan_sparse_head_placement(query, key, value, query_out, key_out, value_out, best_mask_idx, context_length, num_frame, frame_size)
+
+        return query_out, key_out, value_out
+
+    def hidden_states_placement(self, \
+        hidden_states, output_hidden_states, \
+        best_mask_idx, context_length, num_frame, frame_size
+    ):
+        ref_hunyuan_hidden_states_placement(hidden_states, output_hidden_states, best_mask_idx, context_length, num_frame, frame_size)
+
+    def fast_hidden_states_placement(self, \
+        hidden_states, output_hidden_states, \
+        best_mask_idx, context_length, num_frame, frame_size
+    ):
+        hunyuan_hidden_states_placement(hidden_states, output_hidden_states, best_mask_idx, context_length, num_frame, frame_size)
+
+    def attention_core_logic(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        timestep,
+        layer_idx,
+        cu_seqlens_q,
+        cu_seqlens_kv,
+        max_seqlen_q,
+        max_seqlen_kv,
+    ):
+        cfg, num_heads, seq_len, dim = query.size()
+        
+        context_length, num_frame, frame_size = self.context_length, self.num_frame, self.frame_size
+
+        assert seq_len == context_length + num_frame * frame_size, \
+            f"Query Shape: {seq_len} is not equivalent to {context_length} + {num_frame} * {frame_size}"
+
+        sampled_mses = self.sample_mse(query, key, value)
+        best_mask_idx = torch.argmin(sampled_mses, dim=0)
+
+
+        output_hidden_states = torch.zeros_like(query)
+
+        query_out, key_out, value_out = torch.zeros_like(query), torch.zeros_like(key), torch.zeros_like(value)
+
+        query_out, key_out, value_out = self.fast_sparse_head_placement(query, key, value, query_out, key_out, value_out, best_mask_idx, context_length, num_frame, frame_size)
+
+        hidden_states = self.sparse_flex_attention(query_out, key_out, value_out, block_mask=self.block_mask)
+
+        self.fast_hidden_states_placement(hidden_states, output_hidden_states, best_mask_idx, context_length, num_frame, frame_size)
+
+        return output_hidden_states.reshape(cfg, num_heads, seq_len, dim)
 
 
 def get_cu_seqlens(text_mask, img_len):
@@ -107,18 +221,10 @@ def attention(
                 
         # Determine if we use Full Attention to calculate  # TODO  
         full_attention_flag = False
-        from sparseattn.custom_fast_attention_processor import Hunyuan_FastSparseAttn_SampleMSE_Processor2_0 as AttnModule
-        if layer_idx < 42 * AttnModule.first_layers_fp:
+        if layer_idx < 42 * Hunyuan_SparseAttn.first_layers_fp:
             full_attention_flag = True
-        if timestep > 1000 * (1 - AttnModule.first_times_fp):
+        if timestep > 1000 * (1 - Hunyuan_SparseAttn.first_times_fp):
             full_attention_flag = True
-        
-        full_precision_flag = False
-        if AttnModule.quantization_type is not None:
-            if layer_idx < 42 * AttnModule.quantize_first_layers_fp:
-               full_precision_flag = True 
-            if timestep > 1000 * (1 - AttnModule.quantize_first_times_fp):
-                full_precision_flag = True
 
         if full_attention_flag:    
             mode = "flash"
@@ -137,21 +243,13 @@ def attention(
             q, k, v, attn_mask=attn_mask, dropout_p=drop_rate, is_causal=causal
         )
     elif mode == "sparse":
-        from sparseattn.custom_fast_attention_processor import Hunyuan_FastSparseAttn_SampleMSE_Processor2_0
-
-        if not full_precision_flag:
-            if AttnModule.quantization_type is not None:
-                from sparseattn.quantization.quantize import quantize
-                q, k, v = quantize(q, k, v, AttnModule.quantization_type)
-            
-        x = Hunyuan_FastSparseAttn_SampleMSE_Processor2_0.attention_core_logic(
+        x = Hunyuan_SparseAttn.attention_core_logic(
             q, k, v, timestep, layer_idx,
             cu_seqlens_q,
             cu_seqlens_kv,
             max_seqlen_q,
             max_seqlen_kv,
         )
-
     elif mode == "flash":
         x = flash_attn_varlen_func(
             q,
@@ -259,3 +357,18 @@ def parallel_attention(
     attn = attn.reshape(b, s, -1)
 
     return attn
+
+
+def prepare_flexattention(cfg_size, num_head, head_dim, dtype, device, context_length, prompt_length, num_frame, frame_size, \
+    diag_width=1, multiplier=2
+):
+    assert diag_width == multiplier
+    seq_len = context_length + num_frame * frame_size
+    query, key, value = [torch.zeros((1, cfg_size * num_head, seq_len, head_dim), dtype=dtype, device=device) for _ in range(3)]
+
+    mask_mod = generate_temporal_head_mask_mod(context_length, prompt_length, num_frame, frame_size, mul=multiplier)
+    block_mask = create_block_mask_cached(mask_mod, None, None, seq_len, seq_len, device=device, _compile=True)
+
+    hidden_states = flex_attention(query, key, value, block_mask=block_mask)
+
+    return block_mask

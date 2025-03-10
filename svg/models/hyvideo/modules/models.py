@@ -17,12 +17,7 @@ from .posemb_layers import apply_rotary_emb
 from .mlp_layers import MLP, MLPEmbedder, FinalLayer
 from .modulate_layers import ModulateDiT, modulate, apply_gate
 from .token_refiner import SingleTokenRefiner
-from sparseattn.flexattention.timer import time_logging_decorator
-import sys
-sys.path.append('kernels/build/')
-import _kernels
 
-from sparseattn.flexattention.timer import time_logging_decorator
 
 class MMDoubleStreamBlock(nn.Module):
     """
@@ -130,7 +125,7 @@ class MMDoubleStreamBlock(nn.Module):
             **factory_kwargs,
         )
         self.hybrid_seq_parallel_attn = None
-        
+
         # Sparsity
         self.sparse_args = None
 
@@ -140,25 +135,6 @@ class MMDoubleStreamBlock(nn.Module):
     def disable_deterministic(self):
         self.deterministic = False
 
-    @time_logging_decorator("fast_qk_norm")
-    def fast_qk_norm(self, img_q, img_k):
-        _kernels.layer_norm_forward(img_q.reshape(-1, img_q.shape[-1]), self.img_attn_q_norm.weight, self.img_attn_q_norm.bias)
-        _kernels.layer_norm_forward(img_k.reshape(-1, img_k.shape[-1]), self.img_attn_k_norm.weight, self.img_attn_k_norm.bias)
-        return img_q, img_k
-    
-    @time_logging_decorator("fast_image_rotary_emb")
-    def fast_image_rotary_emb(self, image_rotary_emb, img_q, img_k, text_seq_length):
-        # vis_query = query[:, :, text_seq_length:].contiguous()
-        # vis_key = key[:, :, text_seq_length:].contiguous()
-        # vis_query, vis_key = self.vis_qk_copy(query, key, text_seq_length)
-        cos, sin = image_rotary_emb
-        _kernels.apply_qk_rope_inplace_cossin_txtlast(img_q, img_k, cos, sin, text_seq_length)
-        # self.vis_qk_copy_back(query, key, vis_query, vis_key, text_seq_length)
-        # query[:, :, text_seq_length:] = vis_query
-        # key[:, :, text_seq_length:] = vis_key
-        return img_q, img_k
-
-    @time_logging_decorator("layer-double stream")
     def forward(
         self,
         img: torch.Tensor,
@@ -194,42 +170,22 @@ class MMDoubleStreamBlock(nn.Module):
         img_modulated = modulate(
             img_modulated, shift=img_mod1_shift, scale=img_mod1_scale
         )
-
         img_qkv = self.img_attn_qkv(img_modulated)
-
         img_q, img_k, img_v = rearrange(
             img_qkv, "B L (K H D) -> K B L H D", K=3, H=self.heads_num
         )
-
-        # Cause Inefficiency
-        img_q = img_q.transpose(1, 2).contiguous()
-        img_k = img_k.transpose(1, 2).contiguous()
-        
         # Apply QK-Norm if needed
-
-        if self.sparse_args.pattern == "SVG":
-            _kernels.rms_norm_forward(img_q.view(-1, img_q.shape[-1]), self.img_attn_q_norm.weight, self.img_attn_q_norm.eps)
-            _kernels.rms_norm_forward(img_k.view(-1, img_k.shape[-1]), self.img_attn_k_norm.weight, self.img_attn_k_norm.eps)
-        else:
-            img_q = self.img_attn_q_norm(img_q).to(img_v)
-            img_k = self.img_attn_k_norm(img_k).to(img_v)
+        img_q = self.img_attn_q_norm(img_q).to(img_v)
+        img_k = self.img_attn_k_norm(img_k).to(img_v)
 
         # Apply RoPE if needed.
         if freqs_cis is not None:
-            if self.sparse_args.pattern == "SVG":
-                cos, sin = freqs_cis[0], freqs_cis[1]
-                _kernels.apply_qk_rope_inplace_cossin_txtlast(img_q, img_k, cos, sin, 0)
-            else:
-                img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=True)
-                assert (
-                    img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
-                ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
-                img_q, img_k = img_qq, img_kk
+            img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=False)
+            assert (
+                img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
+            ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
+            img_q, img_k = img_qq, img_kk
 
-        # Cause Inefficiency
-        img_q = img_q.transpose(1, 2).contiguous()
-        img_k = img_k.transpose(1, 2).contiguous()
-        
         # Prepare txt for attention.
         txt_modulated = self.txt_norm1(txt)
         txt_modulated = modulate(
@@ -239,7 +195,6 @@ class MMDoubleStreamBlock(nn.Module):
         txt_q, txt_k, txt_v = rearrange(
             txt_qkv, "B L (K H D) -> K B L H D", K=3, H=self.heads_num
         )
-
         # Apply QK-Norm if needed.
         txt_q = self.txt_attn_q_norm(txt_q).to(txt_v)
         txt_k = self.txt_attn_k_norm(txt_k).to(txt_v)
@@ -258,7 +213,7 @@ class MMDoubleStreamBlock(nn.Module):
                 q,
                 k,
                 v,
-                mode="sparse" if self.sparse_args.pattern == "SVG" else "flash",
+                mode="flash",
                 cu_seqlens_q=cu_seqlens_q,
                 cu_seqlens_kv=cu_seqlens_kv,
                 max_seqlen_q=max_seqlen_q,
@@ -278,7 +233,7 @@ class MMDoubleStreamBlock(nn.Module):
                 cu_seqlens_q=cu_seqlens_q,
                 cu_seqlens_kv=cu_seqlens_kv
             )
-    
+        
         # attention computation end
 
         img_attn, txt_attn = attn[:, : img.shape[1]], attn[:, img.shape[1] :]
@@ -384,7 +339,6 @@ class MMSingleStreamBlock(nn.Module):
     def disable_deterministic(self):
         self.deterministic = False
 
-    @time_logging_decorator("layer-single stream")
     def forward(
         self,
         x: torch.Tensor,
@@ -410,30 +364,22 @@ class MMSingleStreamBlock(nn.Module):
         k = k.transpose(1, 2).contiguous()
         
         # Apply QK-Norm if needed.
-        if self.sparse_args.pattern == "SVG":
-            _kernels.rms_norm_forward(q.view(-1, q.shape[-1]), self.q_norm.weight, self.q_norm.eps)
-            _kernels.rms_norm_forward(k.view(-1, k.shape[-1]), self.k_norm.weight, self.k_norm.eps)
-        else:
-            q = self.q_norm(q).to(v)
-            k = self.k_norm(k).to(v)
+        q = self.q_norm(q).to(v)
+        k = self.k_norm(k).to(v)
 
         # Apply RoPE if needed.
         if freqs_cis is not None:
-            if self.sparse_args.pattern == "SVG":
-                cos, sin = freqs_cis[0], freqs_cis[1]
-                _kernels.apply_qk_rope_inplace_cossin_txtlast(q, k, cos, sin, txt_len)
-            else:
-                img_q, txt_q = q[:, :, :-txt_len, :], q[:, :, -txt_len:, :]
-                img_k, txt_k = k[:, :, :-txt_len, :], k[:, :, -txt_len:, :]
+            img_q, txt_q = q[:, :, :-txt_len, :], q[:, :, -txt_len:, :]
+            img_k, txt_k = k[:, :, :-txt_len, :], k[:, :, -txt_len:, :]
 
-                img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=True)
-                assert (
-                    img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
-                ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
-                img_q, img_k = img_qq, img_kk
+            img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=True)
+            assert (
+                img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
+            ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
+            img_q, img_k = img_qq, img_kk
 
-                q = torch.cat((img_q, txt_q), dim=2)
-                k = torch.cat((img_k, txt_k), dim=2)
+            q = torch.cat((img_q, txt_q), dim=2)
+            k = torch.cat((img_k, txt_k), dim=2)
 
             # Cause Inefficiency
             q = q.transpose(1, 2).contiguous()
@@ -450,7 +396,7 @@ class MMSingleStreamBlock(nn.Module):
                 q,
                 k,
                 v,
-                mode="sparse" if self.sparse_args.pattern == "SVG" else "flash",
+                mode="flash",
                 cu_seqlens_q=cu_seqlens_q,
                 cu_seqlens_kv=cu_seqlens_kv,
                 max_seqlen_q=max_seqlen_q,
@@ -474,7 +420,6 @@ class MMSingleStreamBlock(nn.Module):
 
         # Compute activation in mlp stream, cat again and run second linear layer.
         output = self.linear2(torch.cat((attn, self.mlp_act(mlp)), 2))
-
         return x + apply_gate(output, gate=mod_gate)
 
 
