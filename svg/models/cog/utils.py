@@ -56,7 +56,7 @@ def sparsity_to_width(sparsity, context_length, num_frame, frame_size):
 def get_attention_mask(mask_name, context_length, num_frame, frame_size):
     # TODO: Replace with real implementation
     if mask_name == "spatial":
-        attention_mask = torch.load("/home/andy/I2VSparse/sparseattn/v1.5/mask_tensor/mask_spatial.pt", map_location="cuda")
+        attention_mask = torch.load("/data/home/xihaocheng/andy_develop/I2VSparse/sparseattn/v1.5/mask_tensor/mask_spatial.pt", map_location="cuda")
     elif mask_name == "temporal":
-        attention_mask = torch.load("/home/andy/I2VSparse/sparseattn/v1.5/mask_tensor/mask_temporal.pt", map_location="cuda")
+        attention_mask = torch.load("/data/home/xihaocheng/andy_develop/I2VSparse/sparseattn/v1.5/mask_tensor/mask_temporal.pt", map_location="cuda")
     return attention_mask

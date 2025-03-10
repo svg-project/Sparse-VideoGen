@@ -18,9 +18,9 @@ from .mlp_layers import MLP, MLPEmbedder, FinalLayer
 from .modulate_layers import ModulateDiT, modulate, apply_gate
 from .token_refiner import SingleTokenRefiner
 from .models import MMDoubleStreamBlock, MMSingleStreamBlock
-import sys
-sys.path.append('kernels/build/')
-import _kernels
+# import sys
+# sys.path.append('kernels/build/')
+# import _kernels
 
 
 class MMDoubleStreamBlock_Sparse(MMDoubleStreamBlock):
@@ -72,22 +72,34 @@ class MMDoubleStreamBlock_Sparse(MMDoubleStreamBlock):
             img_qkv, "B L (K H D) -> K B L H D", K=3, H=self.heads_num
         )
 
-        # Cause Inefficiency
-        img_q = img_q.transpose(1, 2).contiguous()
-        img_k = img_k.transpose(1, 2).contiguous()
+        # # Cause Inefficiency
+        # img_q = img_q.transpose(1, 2).contiguous()
+        # img_k = img_k.transpose(1, 2).contiguous()
         
+        # # Apply QK-Norm if needed
+        # _kernels.rms_norm_forward(img_q.view(-1, img_q.shape[-1]), self.img_attn_q_norm.weight, self.img_attn_q_norm.eps)
+        # _kernels.rms_norm_forward(img_k.view(-1, img_k.shape[-1]), self.img_attn_k_norm.weight, self.img_attn_k_norm.eps)
+
+        # # Apply RoPE if needed.
+        # if freqs_cis is not None:
+        #     cos, sin = freqs_cis[0], freqs_cis[1]
+        #     _kernels.apply_qk_rope_inplace_cossin_txtlast(img_q, img_k, cos, sin, 0)
+
+        # # Cause Inefficiency
+        # img_q = img_q.transpose(1, 2).contiguous()
+        # img_k = img_k.transpose(1, 2).contiguous()
+
         # Apply QK-Norm if needed
-        _kernels.rms_norm_forward(img_q.view(-1, img_q.shape[-1]), self.img_attn_q_norm.weight, self.img_attn_q_norm.eps)
-        _kernels.rms_norm_forward(img_k.view(-1, img_k.shape[-1]), self.img_attn_k_norm.weight, self.img_attn_k_norm.eps)
+        img_q = self.img_attn_q_norm(img_q).to(img_v)
+        img_k = self.img_attn_k_norm(img_k).to(img_v)
 
         # Apply RoPE if needed.
         if freqs_cis is not None:
-            cos, sin = freqs_cis[0], freqs_cis[1]
-            _kernels.apply_qk_rope_inplace_cossin_txtlast(img_q, img_k, cos, sin, 0)
-
-        # Cause Inefficiency
-        img_q = img_q.transpose(1, 2).contiguous()
-        img_k = img_k.transpose(1, 2).contiguous()
+            img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=False)
+            assert (
+                img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
+            ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
+            img_q, img_k = img_qq, img_kk
         
         # Prepare txt for attention.
         txt_modulated = self.txt_norm1(txt)
@@ -195,18 +207,44 @@ class MMSingleStreamBlock_Sparse(MMSingleStreamBlock):
 
         q, k, v = rearrange(qkv, "B L (K H D) -> K B L H D", K=3, H=self.heads_num)
 
+        # # Cause Inefficiency
+        # q = q.transpose(1, 2).contiguous()
+        # k = k.transpose(1, 2).contiguous()
+        
+        # # Apply QK-Norm if needed.
+        # _kernels.rms_norm_forward(q.view(-1, q.shape[-1]), self.q_norm.weight, self.q_norm.eps)
+        # _kernels.rms_norm_forward(k.view(-1, k.shape[-1]), self.k_norm.weight, self.k_norm.eps)
+
+        # # Apply RoPE if needed.
+        # if freqs_cis is not None:
+        #     cos, sin = freqs_cis[0], freqs_cis[1]
+        #     _kernels.apply_qk_rope_inplace_cossin_txtlast(q, k, cos, sin, txt_len)
+
+        #     # Cause Inefficiency
+        #     q = q.transpose(1, 2).contiguous()
+        #     k = k.transpose(1, 2).contiguous()
+
         # Cause Inefficiency
         q = q.transpose(1, 2).contiguous()
         k = k.transpose(1, 2).contiguous()
         
         # Apply QK-Norm if needed.
-        _kernels.rms_norm_forward(q.view(-1, q.shape[-1]), self.q_norm.weight, self.q_norm.eps)
-        _kernels.rms_norm_forward(k.view(-1, k.shape[-1]), self.k_norm.weight, self.k_norm.eps)
+        q = self.q_norm(q).to(v)
+        k = self.k_norm(k).to(v)
 
         # Apply RoPE if needed.
         if freqs_cis is not None:
-            cos, sin = freqs_cis[0], freqs_cis[1]
-            _kernels.apply_qk_rope_inplace_cossin_txtlast(q, k, cos, sin, txt_len)
+            img_q, txt_q = q[:, :, :-txt_len, :], q[:, :, -txt_len:, :]
+            img_k, txt_k = k[:, :, :-txt_len, :], k[:, :, -txt_len:, :]
+
+            img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=True)
+            assert (
+                img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
+            ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
+            img_q, img_k = img_qq, img_kk
+
+            q = torch.cat((img_q, txt_q), dim=2)
+            k = torch.cat((img_k, txt_k), dim=2)
 
             # Cause Inefficiency
             q = q.transpose(1, 2).contiguous()

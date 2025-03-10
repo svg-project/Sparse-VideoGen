@@ -70,22 +70,18 @@ if __name__ == "__main__":
     print(f"Spatial_width: {spatial_width}, Temporal_width: {temporal_width}. Sparsity: {args.sparsity}")
 
     save_path = args.output_path
-    if not os.path.exists(args.save_path):
-        os.makedirs(save_path, exist_ok=True)
         
     if args.pattern == "SVG":
         masks = ["spatial", "temporal"]
 
         def get_attention_mask(version, mask_name):
-            print(f"Loading Attention Sparse Mask {mask_name}")
-            print(f"Memory: {torch.cuda.memory_allocated() // 1024 ** 2} / {torch.cuda.max_memory_allocated() // 1024 ** 2} MB before Loading Mask")
 
-            attention_type = mask_name.split("sparse")[-1]
-            attention_mask = torch.load(f"sparseattn/{version}/mask_tensor/mask_{attention_type}.pt", map_location="cpu")
+            # TODO: fix hard coded mask
+            if mask_name == "spatial":
+                attention_mask = torch.load(f"/data/home/xihaocheng/andy_develop/tmp_data/hunyuanvideo/I2VSparse/sparseattn/v5/mask_tensor/mask_spatial.pt", map_location="cpu")
+            else:
+                attention_mask = torch.load(f"/data/home/xihaocheng/andy_develop/tmp_data/hunyuanvideo/I2VSparse/sparseattn/v5/mask_tensor/mask_temporal.pt", map_location="cpu")
             attention_mask = attention_mask[:args.sample_mse_max_row].cuda()
-        
-            print(f"Memory: {torch.cuda.memory_allocated() // 1024 ** 2} / {torch.cuda.max_memory_allocated() // 1024 ** 2} MB after Loading Mask")
-
             return attention_mask
 
 
@@ -97,6 +93,8 @@ if __name__ == "__main__":
         AttnModule.sample_mse_max_row = args.sample_mse_max_row
         AttnModule.attention_masks = [get_attention_mask(args.version, mask_name) for mask_name in masks]
         AttnModule.version = args.version
+        AttnModule.first_layers_fp = args.first_layers_fp
+        AttnModule.first_times_fp = args.first_times_fp
 
         block_mask = prepare_flexattention(
                 cfg_size, num_head, head_dim, dtype, device, 

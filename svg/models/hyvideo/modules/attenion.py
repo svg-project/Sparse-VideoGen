@@ -53,6 +53,9 @@ class Hunyuan_SparseAttn:
     num_frame = 33
     frame_size = 3600
 
+    first_layers_fp = 0
+    first_times_fp = 0
+
     sample_mse_max_row = 10000
     block_mask = None
     
@@ -61,6 +64,7 @@ class Hunyuan_SparseAttn:
         if not hasattr(F, "scaled_dot_product_attention"):
             raise ImportError("Hunyuan_SparseAttn requires PyTorch 2.0, please upgrade PyTorch.")
 
+    @classmethod
     def sample_mse(self, query, key, value):
         assert len(self.attention_masks) == 2
 
@@ -86,33 +90,39 @@ class Hunyuan_SparseAttn:
 
         return sampled_mses
 
+    @classmethod
     def sparse_flex_attention(self, query, key, value, block_mask):
         return flex_attention(query, key, value, block_mask=block_mask)
 
+    @classmethod
     def sparse_head_placement(self, query, key, value, query_out, key_out, value_out, best_mask_idx, context_length, num_frame, frame_size):
         
         query_out, key_out, value_out = ref_hunyuan_sparse_head_placement(query, key, value, best_mask_idx, context_length, num_frame, frame_size)
 
         return query_out, key_out, value_out
 
+    @classmethod
     def fast_sparse_head_placement(self, query, key, value, query_out, key_out, value_out, best_mask_idx, context_length, num_frame, frame_size):
 
         hunyuan_sparse_head_placement(query, key, value, query_out, key_out, value_out, best_mask_idx, context_length, num_frame, frame_size)
 
         return query_out, key_out, value_out
 
+    @classmethod
     def hidden_states_placement(self, \
         hidden_states, output_hidden_states, \
         best_mask_idx, context_length, num_frame, frame_size
     ):
         ref_hunyuan_hidden_states_placement(hidden_states, output_hidden_states, best_mask_idx, context_length, num_frame, frame_size)
 
+    @classmethod
     def fast_hidden_states_placement(self, \
         hidden_states, output_hidden_states, \
         best_mask_idx, context_length, num_frame, frame_size
     ):
         hunyuan_hidden_states_placement(hidden_states, output_hidden_states, best_mask_idx, context_length, num_frame, frame_size)
 
+    @classmethod
     def attention_core_logic(
         self,
         query: torch.Tensor,
