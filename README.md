@@ -1,0 +1,111 @@
+<div align="center" id="sglangtop">
+  <img src="assets/Minimal_dark_white_background.png" alt="logo" width="400" margin="10px"></img>
+</div>
+<h3 align="center">
+Accelerate Video Generation with High Pixel-level Fidelity
+</h3>
+
+<p align="center">
+| <a href="https://svg-project.github.io/"><b>Blog</b></a> | <a href="https://arxiv.org/abs/2502.01776"><b>Paper</b></a> | <a href="TODO"><b>Twitter/X</b></a> |
+</p>
+
+## 🔥News🔥
+- [2025/03] Sparse VideoGen is open-sourced! HunyuanVideo and CogVideoX v1.5 can be accelerated by 2×
+
+## 📚 About
+Sparse VideoGen (SVG) is a **training-free framework** that leverages **inherent spatial and temporal sparsity** in the 3D Full Attention operations. Sparse VideoGen's core contributions include:
+ - Identifying the **spatial and temporal sparsity patterns** in video diffusion models.
+ - Proposing an **Online Profiling Strategy** to dynamically identify these patterns.
+ - Implementing an end-to-end generation framework through **efficient algorithm-system co-design**, with **hardware-efficient layout transformation** and **customized kernels**.
+
+## 🎥 Demo
+<div style="display: flex; gap: 10px;">
+    <img src="assets/video/SparseVideoGenDemo.gif" style="width: 100%;"/>
+    <img src="assets/video/Algorithm.gif" style="width: 100%;"/>
+</div>
+
+
+## 🛠️ Installation
+Begin by cloning the repository:
+```bash
+git clone https://github.com/svg-project/Sparse-VideoGen.git
+cd Sparse-VideoGen
+```
+
+We recommend using CUDA versions 12.4 / 12.8 + PyTorch versions 2.5.1 / 2.6.0
+```bash
+# 1. Create and activate conda environment
+conda creae -n SVG python==3.10.9
+conda activate SVG
+
+# 2. Install PyTorch
+pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124
+
+# 3. Install pip dependencies from CogVideoX and HunyuanVideo
+
+# 4. (Optional) Install customized kernels for maximized speedup. (You might need to upgrade your cmake and CUDA version.)
+cd svg/kernels
+bash setup.sh
+```
+
+## 🚀 Inference Examples
+### HunyuanVideo
+To run HunyuanVideo Text-to-Video inference examples, run
+```bash
+bash scripts/hyvideo_inference.sh
+```
+
+Command line:
+```bash
+python3 hyvideo_inference.py \
+    --video-size 720 1280 \
+    --video-length 129 \
+    --infer-steps 50 \
+    --seed 0 \
+    --prompt "A cat walks on the grass, realistic style." \
+    --embedded-cfg-scale 6.0 \
+    --flow-shift 7.0 \
+    --flow-reverse \
+    --use-cpu-offload \
+    --output_path ./output.mp4 \
+    --pattern "SVG" \
+    --version "v5" \
+    --num_sampled_rows 64 \
+    --sparsity 0.2 \
+    --first_times_fp 0.04 \
+    --first_layers_fp 0.025
+```
+
+On a single H100, the generation should takes 14 minutes.
+
+### CogVideoX v1.5
+To run CogVideoX v1.5 Image-to-Video inference exmaples, run
+```bash
+scripts/cog_inference.sh
+```
+
+Command line:
+```bash
+python3 cog_inference.py \
+    --prompt "A bright yellow water taxi glides smoothly across the choppy waters, creating gentle ripples in its wake. The iconic Brooklyn Bridge looms majestically in the background, its intricate web of cables and towering stone arches standing out against the city skyline. The boat, bustling with passengers, offers a lively contrast to the serene, expansive sky dotted with fluffy clouds. As it cruises forward, the vibrant cityscape of New York unfolds, with towering skyscrapers and historic buildings lining the waterfront, capturing the dynamic essence of urban life." \
+    --image_path "examples/cog/img/boat.jpg" \
+    --output_path "output.mp4"
+```
+
+On a single H100, the generation should takes 4 minutes.
+
+## 📑 Open-source Plan
+ - [ ] Support FP8 attention
+ - [ ] Support [Wan 2.1](https://github.com/Wan-Video/Wan2.1)
+ - [ ] Support [Cosmos](https://github.com/NVIDIA/Cosmos)
+
+## 🔗 BibTeX
+If you find Sparse VideoGen useful for your research and applications or interesting, please cite our work using BibTeX:
+```bibtex
+@article{xi2025sparse,
+  title={Sparse VideoGen: Accelerating Video Diffusion Transformers with Spatial-Temporal Sparsity},
+  author={Xi, Haocheng and Yang, Shuo and Zhao, Yilong and Xu, Chenfeng and Li, Muyang and Li, Xiuyu and Lin, Yujun and Cai, Han and Zhang, Jintao and Li, Dacheng and others},
+  journal={arXiv preprint arXiv:2502.01776},
+  year={2025}
+}
+```
