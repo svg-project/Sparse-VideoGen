@@ -28,29 +28,33 @@ Sparse VideoGen (SVG) is a **training-free framework** that leverages **inherent
 ## 🛠️ Installation
 Begin by cloning the repository:
 ```bash
-git clone https://github.com/svg-project/Sparse-VideoGen.git
+GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/svg-project/Sparse-VideoGen.git # Do not clone the demo, otherwise is too large
 cd Sparse-VideoGen
 ```
 
 We recommend using CUDA versions 12.4 / 12.8 + PyTorch versions 2.5.1 / 2.6.0
 ```bash
 # 1. Create and activate conda environment
-conda creae -n SVG python==3.10.9
+conda create -n SVG python==3.10.9
 conda activate SVG
 
 # 2. Install PyTorch
 pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124
 
 # 3. Install pip dependencies from CogVideoX and HunyuanVideo
+pip install -r requirements.txt
+pip install flash-attn --no-build-isolation
 
 # 4. (Optional) Install customized kernels for maximized speedup. (You might need to upgrade your cmake and CUDA version.)
+git clone --recursive https://github.com/svg-project/Sparse-VideoGen.git
 cd svg/kernels
 bash setup.sh
 ```
 
 ## 🚀 Inference Examples
 ### HunyuanVideo
-To run HunyuanVideo Text-to-Video inference examples, run
+To run HunyuanVideo Text-to-Video inference examples, you first need to download the checkpoints under `ckpts` following [the official guide](https://github.com/Tencent/HunyuanVideo/blob/main/ckpts/README.md).
+Then, run
 ```bash
 bash scripts/hyvideo_inference.sh
 ```
@@ -69,7 +73,6 @@ python3 hyvideo_inference.py \
     --use-cpu-offload \
     --output_path ./output.mp4 \
     --pattern "SVG" \
-    --version "v5" \
     --num_sampled_rows 64 \
     --sparsity 0.2 \
     --first_times_fp 0.04 \
@@ -81,7 +84,7 @@ On a single H100, the generation should takes 14 minutes.
 ### CogVideoX v1.5
 To run CogVideoX v1.5 Image-to-Video inference exmaples, run
 ```bash
-scripts/cog_inference.sh
+bash scripts/cog_inference.sh
 ```
 
 Command line:

@@ -74,7 +74,7 @@ if __name__ == "__main__":
     if args.pattern == "SVG":
         masks = ["spatial", "temporal"]
 
-        def get_attention_mask(version, mask_name):
+        def get_attention_mask(mask_name):
 
             context_length = 256
             num_frame = 33
@@ -122,8 +122,7 @@ if __name__ == "__main__":
         AttnModule = Hunyuan_SparseAttn
         AttnModule.num_sampled_rows = args.num_sampled_rows
         AttnModule.sample_mse_max_row = args.sample_mse_max_row
-        AttnModule.attention_masks = [get_attention_mask(args.version, mask_name) for mask_name in masks]
-        AttnModule.version = args.version
+        AttnModule.attention_masks = [get_attention_mask(mask_name) for mask_name in masks]
         AttnModule.first_layers_fp = args.first_layers_fp
         AttnModule.first_times_fp = args.first_times_fp
 

@@ -2,3 +2,4 @@
 *.mp4
 build/
 ckpts/
+output.mp4

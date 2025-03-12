@@ -394,13 +394,6 @@ def add_sparsity_args(parser: argparse.ArgumentParser):
         help="Save tensor for us to debug.",
     )
     group.add_argument(
-        "--version", 
-        type=str, 
-        default="v1", 
-        choices=["v5"], 
-        help="Random seed for reproducibility"
-    )
-    group.add_argument(
         "--output_path", 
         type=str, 
         required=True, 

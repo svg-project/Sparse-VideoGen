@@ -14,7 +14,7 @@ if __name__ == "__main__":
     parser.add_argument("--prompt", type=str, required=True, help="Prompt")
     parser.add_argument("--pattern", type=str, default="SVG", choices=["SVG", "dense"])
     parser.add_argument("--num_step", type=int, default=50, help="Number of steps to inference")
-    parser.add_argument("--first_layers_fp", type=float, default=0, help="Only works for best config. Leave the 0, 1, 2, 40, 41 layers in FP")
+    parser.add_argument("--first_layers_fp", type=float, default=0.025, help="Only works for best config. Leave the 0, 1, 2, 40, 41 layers in FP")
     parser.add_argument("--first_times_fp", type=float, default=0.2, help="Only works for best config. Leave the first 10% timestep in FP")
     parser.add_argument("--num_sampled_rows", type=int, default=32, help="The number of sampled rows")
     parser.add_argument(

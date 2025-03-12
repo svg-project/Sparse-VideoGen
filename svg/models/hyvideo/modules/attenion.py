@@ -47,7 +47,6 @@ MEMORY_LAYOUT = {
 class Hunyuan_SparseAttn:
     num_sampled_rows = 32
     attention_masks = None
-    version = None
 
     context_length = 256
     num_frame = 33
