@@ -6,7 +6,7 @@ Accelerate Video Generation with High Pixel-level Fidelity
 </h3>
 
 <p align="center">
-| <a href="https://svg-project.github.io/"><b>Blog</b></a> | <a href="https://arxiv.org/abs/2502.01776"><b>Paper</b></a> | <a href="TODO"><b>Twitter/X</b></a> |
+| <a href="https://svg-project.github.io/"><b>Blog</b></a> | <a href="https://arxiv.org/abs/2502.01776"><b>Paper</b></a> | <a href="https://x.com/HaochengXiUCB/status/1899953252327927911"><b>Twitter/X</b></a> |
 </p>
 
 ## 🔥News🔥
