@@ -13,7 +13,7 @@ first_layers_fp=0.0
 sparsity=0.25
 
 CUDA_VISIBLE_DEVICES=$1 python wan_inference.py \
-    --file_idx 8 \
+    --file_idx 6 \
     --pattern "SVG" \
     --num_sampled_rows 64 \
     --sparsity $sparsity \
