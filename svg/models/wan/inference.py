@@ -1,21 +1,31 @@
 import torch
-import torch.nn.functional as F
 
 from diffusers.models.attention_processor import Attention
-from diffusers.utils import export_to_video, load_image
 
 from .attention import WanAttn_SparseAttn_Processor2_0, prepare_flexattention
 from .utils import sparsity_to_width, get_attention_mask
 from .custom_models import replace_sparse_forward
 
-def replace_wan_attention(pipe, num_sampled_rows, sample_mse_max_row, sparsity, first_layers_fp, first_times_fp):
+
+def replace_wan_attention(
+    pipe,
+    height,
+    width,
+    num_frames,
+    num_sampled_rows,
+    sample_mse_max_row,
+    sparsity,
+    first_layers_fp,
+    first_times_fp
+):
 
     masks = ["spatial", "temporal"]
 
     context_length = 0
-    num_frame = 21
-    frame_size = 3600
-    
+    num_frame = 1 + num_frames // (pipe.vae_scale_factor_temporal * pipe.transformer.config.patch_size[0])
+    mod_value = pipe.vae_scale_factor_spatial * pipe.transformer.config.patch_size[1]
+    frame_size = int(height // mod_value) * int(width // mod_value)
+
     dtype = torch.bfloat16
 
     AttnModule = WanAttn_SparseAttn_Processor2_0

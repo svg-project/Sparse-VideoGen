@@ -65,6 +65,9 @@ if __name__ == "__main__":
     if args.pattern == "SVG":
         replace_wan_attention(
             pipe,
+            args.height,
+            args.width,
+            args.num_frames,
             args.num_sampled_rows,
             args.sample_mse_max_row,
             args.sparsity,

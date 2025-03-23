@@ -29,10 +29,10 @@ def generate_temporal_head_mask_mod(context_length: int = 226, prompt_length: in
         two_frame = round_to_multiple(mul * token_per_frame)
         temporal_head_mask = (torch.abs(q_idx - kv_idx) <= two_frame)
 
-        return temporal_head_mask
-        # first_frame_mask = (kv_idx < token_per_frame)
-        # video_mask = first_frame_mask | temporal_head_mask
-        # return video_mask
+        # return temporal_head_mask
+        first_frame_mask = (kv_idx < token_per_frame)
+        video_mask = first_frame_mask | temporal_head_mask
+        return video_mask
     
     return temporal_mask_mod
 
