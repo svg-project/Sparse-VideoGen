@@ -239,7 +239,7 @@ def prepare_flexattention(cfg_size, num_head, head_dim, dtype, device, context_l
     assert diag_width == multiplier, f"{diag_width} is not equivalent to {multiplier}"
     
     seq_len = context_length + num_frame * frame_size
-    query, key, value = [torch.zeros((1, cfg_size * num_head, seq_len, head_dim), dtype=dtype, device=device) for _ in range(3)]
+    query, key, value = [torch.zeros((cfg_size, num_head, seq_len, head_dim), dtype=dtype, device=device) for _ in range(3)]
 
     mask_mod = generate_temporal_head_mask_mod(context_length, prompt_length, num_frame, frame_size, mul=multiplier)
     block_mask = create_block_mask_cached(mask_mod, None, None, seq_len, seq_len, device=device, _compile=True)

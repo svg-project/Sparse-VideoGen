@@ -48,9 +48,9 @@ if __name__ == "__main__":
             data = json.load(open(f"captions_sora.json"))
             args.prompt = data[args.file_idx]
 
+            # Define the output file path
             output_dir = f"result/{args.pattern}"
             os.makedirs(output_dir, exist_ok=True)
-            # Define the output file path
             args.output_file = f"{output_dir}/{args.file_idx}-{args.seed}.mp4"
         else:
             print(colored("Using default prompt", "red"))

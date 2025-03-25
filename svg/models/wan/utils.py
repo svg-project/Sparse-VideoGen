@@ -64,7 +64,10 @@ def get_attention_mask(mask_name, sample_mse_max_row, context_length, num_frame,
     # TODO: fix hard coded mask
     if mask_name == "spatial":
         pixel_attn_mask = torch.zeros_like(attention_mask, dtype=torch.bool, device="cpu")
-        block_size, block_thres = 128, frame_size * 1.5
+        
+        pixel_attn_mask[:, :frame_size] = 1 # First Frame Sink
+        
+        block_size, block_thres = 128, frame_size * 2
         num_block = math.ceil(num_frame * frame_size / block_size)
         for i in range(num_block):
             for j in range(num_block):
@@ -74,7 +77,9 @@ def get_attention_mask(mask_name, sample_mse_max_row, context_length, num_frame,
     else:
         pixel_attn_mask = torch.zeros_like(attention_mask, dtype=torch.bool, device="cpu")
 
-        block_size, block_thres = 128, frame_size * 1.5
+        pixel_attn_mask[:, :frame_size] = 1 # First Frame Sink
+        
+        block_size, block_thres = 128, frame_size * 2
         num_block = math.ceil(num_frame * frame_size / block_size)
         for i in range(num_block):
             for j in range(num_block):
