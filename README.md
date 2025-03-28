@@ -46,7 +46,7 @@ pip install -r requirements.txt
 pip install flash-attn --no-build-isolation
 
 # 4. (Optional) Install customized kernels for maximized speedup. (You might need to upgrade your cmake and CUDA version.)
-git clone --recursive https://github.com/svg-project/Sparse-VideoGen.git
+git submodule update --init --recursive
 cd svg/kernels
 bash setup.sh
 ```
