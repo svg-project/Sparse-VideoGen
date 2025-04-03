@@ -42,9 +42,6 @@ class WanAttn_SparseAttn_Processor2_0:
         return query, key, value
     
     def get_qk_norm(self, attn, query, key):
-        import IPython
-        IPython.embed()
-        
         if attn.norm_q is not None:
             query = attn.norm_q(query)
         if attn.norm_k is not None:
