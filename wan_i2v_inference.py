@@ -92,4 +92,11 @@ if __name__ == "__main__":
         guidance_scale=5.0,
         num_inference_steps=args.num_inference_steps
     ).frames[0]
+    
+    
+    # Create parent directory for output file if it doesn't exist
+    output_dir = os.path.dirname(args.output_file)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+        
     export_to_video(output, args.output_file, fps=16)

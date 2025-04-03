@@ -52,6 +52,48 @@ bash setup.sh
 ```
 
 ## 🚀 Inference Examples
+### Wan 2.1
+We support running Wan 2.1 inference using diffusers. Please make sure to install the latest version of diffusers.
+```bash
+pip install git+https://github.com/huggingface/diffusers
+```
+
+We support Text-to-Video and Image-to-Video inference of Wan 2.1 model. The running scripts are:
+```bash
+# Text-to-Video
+bash scripts/wan_t2v_inference.sh
+
+# Image-to-Video
+bash scripts/wan_i2v_inference.sh
+```
+
+Command Line:
+```python
+# Text-to-Video
+python wan_t2v_inference.py \
+    --prompt ${prompt} \
+    --height 720 \
+    --width 1280 \
+    --pattern "SVG" \
+    --num_sampled_rows 64 \
+    --sparsity 0.25 \
+    --first_times_fp 0.025 \
+    --first_layers_fp 0.075
+
+# Image-to-Video
+python wan_i2v_inference.py \
+    --prompt "$prompt" \
+    --image_path "$image_path" \
+    --seed 0 \
+    --num_inference_steps 40 \
+    --pattern "SVG" \
+    --num_sampled_rows 64 \
+    --sparsity 0.25 \
+    --first_times_fp 0.025 \
+    --first_layers_fp 0.075
+```
+
+
 ### HunyuanVideo
 To run HunyuanVideo Text-to-Video inference examples, you first need to download the checkpoints under `ckpts` following [the official guide](https://github.com/Tencent/HunyuanVideo/blob/main/ckpts/README.md).
 Then, run
@@ -60,7 +102,7 @@ bash scripts/hyvideo_inference.sh
 ```
 
 Command line:
-```bash
+```python
 python3 hyvideo_inference.py \
     --video-size 720 1280 \
     --video-length 129 \
@@ -75,7 +117,7 @@ python3 hyvideo_inference.py \
     --pattern "SVG" \
     --num_sampled_rows 64 \
     --sparsity 0.2 \
-    --first_times_fp 0.04 \
+    --first_times_fp 0.055 \
     --first_layers_fp 0.025
 ```
 
@@ -88,7 +130,7 @@ bash scripts/cog_inference.sh
 ```
 
 Command line:
-```bash
+```python
 python3 cog_inference.py \
     --prompt "A bright yellow water taxi glides smoothly across the choppy waters, creating gentle ripples in its wake. The iconic Brooklyn Bridge looms majestically in the background, its intricate web of cables and towering stone arches standing out against the city skyline. The boat, bustling with passengers, offers a lively contrast to the serene, expansive sky dotted with fluffy clouds. As it cruises forward, the vibrant cityscape of New York unfolds, with towering skyscrapers and historic buildings lining the waterfront, capturing the dynamic essence of urban life." \
     --image_path "examples/cog/img/boat.jpg" \

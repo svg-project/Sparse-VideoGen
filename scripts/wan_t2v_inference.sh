@@ -5,10 +5,10 @@ first_times_fp=0.075
 first_layers_fp=0.025
 sparsity=0.25
 
-prompt=$(cat /ssd/data/xihaocheng/Sparse-VideoGen/examples/wan/1/prompt.txt)
+prompt=$(cat examples/wan/1/prompt.txt)
 
-CUDA_VISIBLE_DEVICES=$1 python wan_inference.py \
-    --prompt $prompt \
+python wan_t2v_inference.py \
+    --prompt "$prompt" \
     --height 720 \
     --width 1280 \
     --pattern "SVG" \

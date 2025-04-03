@@ -5,15 +5,15 @@ first_times_fp=0.09
 first_layers_fp=0.025
 sparsity=0.25
 
-prompt=$(cat /ssd/data/xihaocheng/Sparse-VideoGen/examples/wan/1/prompt.txt)
+prompt=$(cat examples/wan/1/prompt.txt)
 image_path="examples/wan/1/image.jpg"
 
 python wan_i2v_inference.py \
-    --prompt $prompt \
-    --image_path $image_path \
-    --seed $seed \
+    --prompt "$prompt" \
+    --image_path "$image_path" \
+    --seed 0 \
     --num_inference_steps 40 \
-    --pattern $pattern \
+    --pattern "SVG" \
     --num_sampled_rows 64 \
     --sparsity $sparsity \
     --first_times_fp $first_times_fp \

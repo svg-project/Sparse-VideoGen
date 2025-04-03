@@ -4,7 +4,7 @@
 # TFP Values: 
 # Set the following values to control the percentage of timesteps using dense attention:
 # 35% → 0.07, 30% → 0.055, 25% → 0.04, 20% → 0.033, 15% → 0.02, 10% → 0.015
-first_times_fp=0.04
+first_times_fp=0.055
 first_layers_fp=0.025
 
 python3 hyvideo_inference.py \
