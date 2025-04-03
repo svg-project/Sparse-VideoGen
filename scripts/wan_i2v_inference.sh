@@ -1,39 +1,20 @@
-# Description: This script demonstrates how to inference a video based on HunyuanVideo model
-if [ $# -eq 0 ]; then
-    echo "Please provide the CUDA device number as an argument."
-    echo "Usage: $0 <cuda_device_number>"
-    exit 1
-fi
+# TFP Values: 
+# Set the following values to control the percentage of timesteps using dense attention:
+# 35% → 0.09, 30% → 0.075, 25% → 0.055, 20% → 0.045, 15% → 0.03, 10% → 0.02
+first_times_fp=0.09
+first_layers_fp=0.025
+sparsity=0.25
 
-# for file_idx in $(seq 1 30); do # $(seq 1 10); do
-#     CUDA_VISIBLE_DEVICES=$1 python wan_i2v_inference.py \
-#         --data_path "/ssd/data/xihaocheng/CropVBench/data" \
-#         --file_idx $file_idx \
-#         --height 720 \
-#         --width 1280
-# done
+prompt=$(cat /ssd/data/xihaocheng/Sparse-VideoGen/examples/wan/1/prompt.txt)
+image_path="examples/wan/1/image.jpg"
 
-# GPUS=(0)
-GPUS=(0 1 2)
-MAX_JOBS=${#GPUS[@]}
-pids=()
-task_idx=0
-
-for file_idx in $(seq 1 30); do
-    GPU_ID=${GPUS[$((task_idx % MAX_JOBS))]}
-    CUDA_VISIBLE_DEVICES=$GPU_ID python wan_i2v_inference.py \
-        --data_path "/ssd/data/xihaocheng/CropVBench/data" \
-        --file_idx $file_idx \
-        --height 720 \
-        --width 1280 \
-        --num_inference_steps 40 &
-    pids+=($!)
-
-    ((task_idx++))
-
-    if [[ ${#pids[@]} -ge $MAX_JOBS ]]; then
-        wait "${pids[0]}"
-        unset pids[0]
-        pids=("${pids[@]}")
-    fi
-done
+python wan_i2v_inference.py \
+    --prompt $prompt \
+    --image_path $image_path \
+    --seed $seed \
+    --num_inference_steps 40 \
+    --pattern $pattern \
+    --num_sampled_rows 64 \
+    --sparsity $sparsity \
+    --first_times_fp $first_times_fp \
+    --first_layers_fp $first_layers_fp

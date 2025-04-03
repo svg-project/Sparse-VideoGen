@@ -14,7 +14,6 @@ from svg.models.wan.inference import replace_wan_attention
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate video from text prompt using Wan-Diffuser")
     parser.add_argument("--model_id", type=str, default="Wan-AI/Wan2.1-T2V-14B-Diffusers", help="Model ID to use for generation")
-    parser.add_argument("--file_idx", type=int, default=None, help="Index of prompt")
     parser.add_argument("--prompt", type=str, default=None, help="Text prompt for video generation")
     parser.add_argument("--negative_prompt", type=str, default=None, help="Negative text prompt to avoid certain features")
     parser.add_argument("--height", type=int, default=720, help="Height of the generated video")
@@ -44,17 +43,8 @@ if __name__ == "__main__":
     pipe.to("cuda")
 
     if args.prompt is None:
-        if args.file_idx:
-            data = json.load(open(f"captions_sora.json"))
-            args.prompt = data[args.file_idx]
-
-            # Define the output file path
-            output_dir = f"result/{args.pattern}"
-            os.makedirs(output_dir, exist_ok=True)
-            args.output_file = f"{output_dir}/{args.file_idx}-{args.seed}.mp4"
-        else:
-            print(colored("Using default prompt", "red"))
-            args.prompt = "A cat walks on the grass, realistic"
+        print(colored("Using default prompt", "red"))
+        args.prompt = "A cat walks on the grass, realistic"
     
     if args.negative_prompt is None:
         args.negative_prompt = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
