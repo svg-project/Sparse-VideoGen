@@ -93,7 +93,7 @@ python wan_i2v_inference.py \
     --first_times_fp 0.025 \
     --first_layers_fp 0.075
 ```
-
+If you want to run 480p video generation, please change the height and weight arguments to 480 and 832.
 
 ### HunyuanVideo
 To run HunyuanVideo Text-to-Video inference examples, you first need to download the checkpoints under `ckpts` following [the official guide](https://github.com/Tencent/HunyuanVideo/blob/main/ckpts/README.md).
