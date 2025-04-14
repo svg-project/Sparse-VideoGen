@@ -42,8 +42,7 @@ def replace_wan_attention(
     AttnModule.frame_size = frame_size
     
     # NOTE: ??? Prepare placement will strongly decrease PSNR
-    # prepare_placement(2, 48, 64, dtype, "cuda", context_length, num_frame, frame_size)
-    block_mask = prepare_flexattention(1, 40, 128, dtype, "cuda", context_length, context_length, num_frame, frame_size, diag_width, multiplier)
+    block_mask = prepare_flexattention(1, pipe.transformer.num_attention_heads, pipe.transformer.attention_head_dim, dtype, "cuda", context_length, context_length, num_frame, frame_size, diag_width, multiplier)
     AttnModule.block_mask = block_mask
     
     print(block_mask)
