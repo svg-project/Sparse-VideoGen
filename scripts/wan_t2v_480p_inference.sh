@@ -7,18 +7,7 @@ sparsity=0.25
 
 prompt=$(cat examples/wan/3/prompt.txt)
 
-# 720p
-python wan_t2v_inference.py \
-    --prompt "$prompt" \
-    --height 720 \
-    --width 1280 \
-    --pattern "SVG" \
-    --num_sampled_rows 64 \
-    --sparsity $sparsity \
-    --first_times_fp $first_times_fp \
-    --first_layers_fp $first_layers_fp
-
-# 480p
+# 480p Sparse VideoGen
 python wan_t2v_inference.py \
     --prompt "$prompt" \
     --height 480 \
@@ -28,3 +17,10 @@ python wan_t2v_inference.py \
     --sparsity $sparsity \
     --first_times_fp $first_times_fp \
     --first_layers_fp $first_layers_fp
+
+# 480p Dense Attention (Baseline)
+python wan_t2v_inference.py \
+    --prompt "$prompt" \
+    --height 480 \
+    --width 832 \
+    --pattern "dense"

@@ -18,3 +18,11 @@ python wan_i2v_inference.py \
     --sparsity $sparsity \
     --first_times_fp $first_times_fp \
     --first_layers_fp $first_layers_fp
+
+# Dense Attention (Baseline)
+# python wan_i2v_inference.py \
+#     --prompt "$prompt" \
+#     --image_path "$image_path" \
+#     --seed 0 \
+#     --num_inference_steps 40 \
+#     --pattern "dense"

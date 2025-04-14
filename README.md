@@ -49,6 +49,7 @@ pip install flash-attn --no-build-isolation
 # 4. (Optional) Install customized kernels for maximized speedup. (You might need to upgrade your cmake and CUDA version.)
 git submodule update --init --recursive
 cd svg/kernels
+pip install -U cmake
 bash setup.sh
 ```
 
@@ -144,6 +145,42 @@ On a single H100, the generation should takes 4 minutes.
  - [ ] Support FP8 attention
  - [x] Support [Wan 2.1](https://github.com/Wan-Video/Wan2.1)
  - [ ] Support [Cosmos](https://github.com/NVIDIA/Cosmos)
+
+## Latency
+We evaluate the performance of our customized kernels against the baseline implementations. The following tables show the memory bandwidth (GB/s) comparison for different batch sizes and hidden dimensions:
+
+### RMSNorm Performance
+
+| Batch Size | Hidden Dim | Diffusers (GB/s) | SVG Customized (GB/s) | Speedup |
+|------------|------------|------------------|----------------------|----------|
+| 2,097,152  | 32        | 151.36           | 809.69              | 5.35×    |
+| 1,048,576  | 64        | 196.54           | 810.61              | 4.12×    |
+| 524,288    | 128       | 232.66           | 810.21              | 3.48×    |
+| 262,144    | 256       | 252.67           | 810.41              | 3.21×    |
+
+### LayerNorm Performance
+
+| Batch Size | Hidden Dim | Diffusers (GB/s) | SVG Customized (GB/s) | Speedup |
+|------------|------------|------------------|----------------------|----------|
+| 2,097,152  | 32        | 45.82            | 808.28              | 17.64×   |
+| 1,048,576  | 64        | 91.18            | 805.22              | 8.83×    |
+| 524,288    | 128       | 197.89           | 804.29              | 4.06×    |
+| 262,144    | 256       | 350.87           | 804.43              | 2.29×    |
+
+Our customized kernels achieve significantly higher memory bandwidth across all configurations, with speedups ranging from 2.29× to 17.64×. The performance improvement is particularly notable for smaller hidden dimensions and larger batch sizes.
+
+### RoPE (Rotary Position Embedding) Performance
+
+| Batch Size | Num Heads | Seq Length | Head Dim | Diffusers (GB/s) | SVG Customized (GB/s) | Speedup |
+|------------|-----------|------------|----------|------------------|----------------------|----------|
+| 1          | 32        | 1024       | 64      | 17.25           | 158.81              | 9.21×    |
+| 1          | 32        | 4096       | 64      | 27.74           | 405.75              | 14.63×   |
+| 1          | 32        | 16384      | 64      | 30.86           | 605.89              | 19.63×   |
+| 4          | 32        | 1024       | 64      | 27.60           | 475.94              | 17.24×   |
+| 4          | 32        | 4096       | 64      | 30.93           | 614.11              | 19.85×   |
+| 4          | 32        | 16384      | 64      | 32.41           | 648.36              | 20.00×   |
+
+The RoPE implementation in SVG shows substantial performance improvements over the Diffusers baseline, with speedups ranging from 9.21× to 20.00×. The performance gain is particularly significant for longer sequence lengths and larger batch sizes, demonstrating excellent scaling characteristics.
 
 ## 🔗 BibTeX
 If you find Sparse VideoGen useful for your research and applications or interesting, please cite our work using BibTeX:

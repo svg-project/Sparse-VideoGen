@@ -1,5 +1,5 @@
 import sys
-sys.path.append('/ssd/data/xihaocheng/Hunyuan/I2VSparse/kernels/build/')
+sys.path.append('build/')
 
 import _kernels
 
@@ -39,14 +39,16 @@ def bench_rms_norm(
 def ref_torch_impl(
     input,
     gemma,
+    eps=1e-5
 ) -> torch.Tensor:
-    return torch.nn.functional.rms_norm(input, [input.size(-1)], gemma, 1e-5)
+    return torch.nn.functional.rms_norm(input, [input.size(-1)], gemma, eps)
 
 def ref_narrow_impl(
     input,
     gemma,
+    eps=1e-5
 ) -> torch.Tensor:
-    _kernels.rms_norm_forward(input, gemma)
+    _kernels.rms_norm_forward(input, gemma, eps)
     return input
 
 num_total_loading = 4096*16*1024

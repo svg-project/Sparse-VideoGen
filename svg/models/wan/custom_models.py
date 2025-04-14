@@ -6,6 +6,7 @@ from torch import nn
 from diffusers.models.transformers.transformer_wan import WanTransformerBlock, WanTransformer3DModel
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.utils import USE_PEFT_BACKEND, logging, scale_lora_layers, unscale_lora_layers
+from svg.models.wan.attention import ENABLE_FAST_KERNEL
 
 class WanTransformerBlock_Sparse(WanTransformerBlock):
     def forward(
@@ -71,6 +72,12 @@ class WanTransformer3DModel_Sparse(WanTransformer3DModel):
         post_patch_width = width // p_w
 
         rotary_emb = self.rope(hidden_states)
+        
+        if ENABLE_FAST_KERNEL:
+            # Required for Sparse VideoGen Fast RoPE
+            rot_real = rotary_emb.real.squeeze(0).squeeze(0).contiguous().to(torch.float32)
+            rot_imag = rotary_emb.imag.squeeze(0).squeeze(0).contiguous().to(torch.float32)
+            rotary_emb = (rot_real, rot_imag)
 
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)

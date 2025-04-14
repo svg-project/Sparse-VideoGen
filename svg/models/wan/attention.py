@@ -12,10 +12,36 @@ from torch.nn.attention.flex_attention import (
 from .placement import wan_sparse_head_placement, wan_hidden_states_placement, ref_wan_sparse_head_placement, ref_wan_hidden_states_placement
 from .utils import generate_temporal_head_mask_mod, create_block_mask_cached
 
+try:
+    sys.path.append('svg/kernels/build/')
+    import _kernels
+
+    def apply_rotary_emb(query: torch.Tensor, key: torch.Tensor, freqs: torch.Tensor):
+        freqs_real, freqs_imag = freqs
+        _kernels.apply_qk_rope_inplace_cossin_complex(query, key, freqs_real, freqs_imag, 0) # len_text_prompt = 0
+        return query, key
+    
+    ENABLE_FAST_KERNEL = True
+
+except ImportError:
+    import warnings
+    warnings.warn("Could not import RoPE / Norm kernels! Falling back to PyTorch implementation.")
+        
+    def apply_rotary_emb(query: torch.Tensor, key: torch.Tensor, freqs: torch.Tensor):
+        def _apply_rotary_emb(hidden_states: torch.Tensor, freqs: torch.Tensor):
+            x_rotated = torch.view_as_complex(hidden_states.to(torch.float64).unflatten(3, (-1, 2)))
+            x_out = torch.view_as_real(x_rotated * freqs).flatten(3, 4)
+            return x_out.type_as(hidden_states)
+
+        query = _apply_rotary_emb(query, freqs)
+        key = _apply_rotary_emb(key, freqs)
+        return query, key
+
+    ENABLE_FAST_KERNEL = False
+
 flex_attention = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
 torch._dynamo.config.cache_size_limit = 192 * 3
 torch._dynamo.config.accumulated_cache_size_limit = 192 * 3
-
 
 class WanAttn_SparseAttn_Processor2_0:
     version = None
@@ -49,23 +75,16 @@ class WanAttn_SparseAttn_Processor2_0:
         return query, key
     
     def get_transpose_qkv(self, attn, query, key, value):
-        query = query.unflatten(2, (attn.heads, -1)).transpose(1, 2)
-        key = key.unflatten(2, (attn.heads, -1)).transpose(1, 2)
-        value = value.unflatten(2, (attn.heads, -1)).transpose(1, 2)
+        query = query.unflatten(2, (attn.heads, -1)).transpose(1, 2).contiguous()
+        key = key.unflatten(2, (attn.heads, -1)).transpose(1, 2).contiguous()
+        value = value.unflatten(2, (attn.heads, -1)).transpose(1, 2).contiguous()
         return query, key, value
     
     def get_rotary_emb(self, query, key, rotary_emb):
 
         if rotary_emb is not None:
+            query, key = apply_rotary_emb(query, key, rotary_emb)
 
-            def apply_rotary_emb(hidden_states: torch.Tensor, freqs: torch.Tensor):
-                x_rotated = torch.view_as_complex(hidden_states.to(torch.float64).unflatten(3, (-1, 2)))
-                x_out = torch.view_as_real(x_rotated * freqs).flatten(3, 4)
-                return x_out.type_as(hidden_states)
-
-            query = apply_rotary_emb(query, rotary_emb)
-            key = apply_rotary_emb(key, rotary_emb)
-        
         return query, key
             
     def get_o(self, attn, query, hidden_states, hidden_states_img):
@@ -103,7 +122,6 @@ class WanAttn_SparseAttn_Processor2_0:
         query, key, value = self.get_transpose_qkv(attn, query, key, value)
         
         query, key = self.get_rotary_emb(query, key, rotary_emb)
-
 
         # I2V task
         hidden_states_img = None
