@@ -1,6 +1,6 @@
 # python orig_wan_generate.py \
 #     --task t2v-14B \
-#     --size 832*480 \
+#     --size 1280*720 \
 #     --ckpt_dir ./Wan2.1-T2V-14B \
 #     --base_seed 0 \
 #     --prompt "Two anthropomorphic cats in comfy boxing gear and bright gloves fight intensely on a spotlighted stage." \
@@ -12,7 +12,7 @@ sparsity=0.25
 
 python orig_wan_generate.py \
     --task t2v-14B \
-    --size 832*480 \
+    --size 1280*720 \
     --ckpt_dir ./Wan2.1-T2V-14B \
     --base_seed 0 \
     --prompt "Two anthropomorphic cats in comfy boxing gear and bright gloves fight intensely on a spotlighted stage." \

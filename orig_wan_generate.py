@@ -4,7 +4,9 @@ from datetime import datetime
 import logging
 import os
 import sys
+import math
 import warnings
+import numpy as np
 
 warnings.filterwarnings("ignore")
 
@@ -42,6 +44,18 @@ EXAMPLE_PROMPT = {
 }
 
 
+def sparsity_to_width(sparsity, context_length, num_frame, frame_size):
+    seq_len = context_length + num_frame * frame_size
+    total_elements = seq_len ** 2
+    
+    sparsity = (sparsity * total_elements - 2 * seq_len * context_length) / total_elements
+      
+    width = seq_len * (1 - math.sqrt(1 - sparsity))
+    width_frame = width / frame_size
+    
+    return width_frame
+
+
 def _validate_args(args):
     # Basic check
     assert args.ckpt_dir is not None, "Please specify the checkpoint directory."
@@ -70,6 +84,17 @@ def _validate_args(args):
     args.base_seed = (
         args.base_seed if args.base_seed >= 0 else random.randint(0, sys.maxsize)
     )
+    
+    def seed_everything(seed):
+        random.seed(seed)
+        os.environ['PYTHONHASHSEED'] = str(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+    seed_everything(args.base_seed)
+    
     # Size check
     assert (
         args.size in SUPPORTED_SIZES[args.task]
@@ -212,6 +237,50 @@ def _parse_args():
         help="Classifier free guidance scale.",
     )
 
+    # Sparse VideoGen
+    parser.add_argument(
+        "--first_layers_fp", 
+        type=float, 
+        default=0.0, 
+        help="Only works for best config. Leave the 0, 1, 2, 40, 41 layers in FP"
+    )
+    parser.add_argument(
+        "--first_times_fp", 
+        type=float, 
+        default=0.0, 
+        help="Only works for best config. Leave the first 10% timestep in FP"
+    )
+    parser.add_argument(
+        "--record_attention", 
+        action="store_true", 
+        help="Record the attention"
+    )
+    parser.add_argument(
+        "--pattern", 
+        type=str, 
+        required=True, 
+        choices=["dense", "SVG"], 
+        help="Sparse Pattern"
+    )
+    parser.add_argument(
+        "--num_sampled_rows", 
+        type=int, 
+        default=32, 
+        help="The number of sampled rows"
+    )
+    parser.add_argument(
+        "--sample_mse_max_row", 
+        type=int, 
+        default=10000, 
+        help="Since some attention masks are really large, need to restrict the maximum size (the row we are going to sample on)."
+    )
+    parser.add_argument(
+        "--sparsity",
+        type=float,
+        default=1.0,
+        help="The sparsity of the striped attention pattern. Accepts one or two float values. Only effective for fast_sample_mse"
+    )
+    
     args = parser.parse_args()
 
     _validate_args(args)
@@ -342,6 +411,118 @@ def generate(args):
             t5_cpu=args.t5_cpu,
         )
 
+        # ============================== Sparse VideoGen ==============================
+
+        def print_operator_log_data(module, input, output):
+            from svg.timer import operator_log_data, ENABLE_LOGGING, clear_operator_log_data
+            
+            if ENABLE_LOGGING:
+                max_key_length = max(len(str(key)) for key in operator_log_data.keys())
+
+                formatted_lines = []
+                for key, value in dict(sorted(operator_log_data.items())).items():
+                    formatted_value = f"{value:.2f}"
+                    line = f"{key:<{max_key_length}} : {formatted_value:>8} ms"
+                    formatted_lines.append(line)
+
+                print("\n".join(formatted_lines))
+                
+                # Renew every print
+                clear_operator_log_data()
+
+        wan_t2v.model.register_forward_hook(print_operator_log_data)
+
+
+        cfg_size, num_head, head_dim, dtype, device = 1, cfg["num_layers"], cfg["dim"] // cfg["num_heads"], torch.bfloat16, "cuda" # Actually it has cfg, but the pipeline will inference it separately
+        context_length, num_frame = 0, (args.frame_num - 1) // wan_t2v.vae_stride[0] + 1
+        frame_size = (SIZE_CONFIGS[args.size][1] // cfg["vae_stride"][1] // cfg["patch_size"][1]) * \
+            ((SIZE_CONFIGS[args.size][0] // cfg["vae_stride"][2] // cfg["patch_size"][2]))
+
+        # Calculation
+        spatial_width = temporal_width = sparsity_to_width(args.sparsity, context_length, num_frame, frame_size)
+                    
+        print(f"Spatial_width: {spatial_width}, Temporal_width: {temporal_width}. Sparsity: {args.sparsity}")
+
+            
+        if args.pattern == "SVG":
+            masks = ["spatial", "temporal"]
+
+            def get_attention_mask(mask_name):
+                
+                from termcolor import colored
+
+                allocated = torch.cuda.memory_allocated() / 1e9
+                print(colored(f"Allocated Memory: {allocated:.2f} GB", "yellow"))
+
+                attention_mask = torch.zeros((context_length + num_frame * frame_size, context_length + num_frame * frame_size), device="cpu")
+
+                # TODO: fix hard coded mask
+                if mask_name == "spatial":
+                    pixel_attn_mask = torch.zeros_like(attention_mask, dtype=torch.bool, device="cpu")
+                    block_size, block_thres = 128, frame_size * 1.5
+                    num_block = math.ceil(num_frame * frame_size / block_size)
+                    for i in range(num_block):
+                        for j in range(num_block):
+                            if abs(i - j) < block_thres // block_size:
+                                pixel_attn_mask[i * block_size : (i + 1) * block_size, j * block_size : (j + 1) * block_size] = 1
+                    attention_mask = pixel_attn_mask
+                else:
+                    pixel_attn_mask = torch.zeros_like(attention_mask, dtype=torch.bool, device=device)
+
+                    block_size, block_thres = 128, frame_size * 1.5
+                    num_block = math.ceil(num_frame * frame_size / block_size)
+                    for i in range(num_block):
+                        for j in range(num_block):
+                            if abs(i - j) < block_thres // block_size:
+                                pixel_attn_mask[i * block_size : (i + 1) * block_size, j * block_size : (j + 1) * block_size] = 1
+
+                    pixel_attn_mask = pixel_attn_mask.reshape(frame_size, num_frame, frame_size, num_frame).permute(1, 0, 3, 2).reshape(frame_size * num_frame, frame_size * num_frame)
+                    attention_mask = pixel_attn_mask
+
+                attention_mask = attention_mask[:args.sample_mse_max_row].cuda()
+                return attention_mask
+
+
+            from svg.models.wan_orig.modules.attention import Wan_SparseAttn, prepare_flexattention, prepare_dense_attention
+            from svg.models.wan_orig.modules.custom_model import replace_sparse_forward
+
+            AttnModule = Wan_SparseAttn
+            AttnModule.num_sampled_rows = args.num_sampled_rows
+            AttnModule.sample_mse_max_row = args.sample_mse_max_row
+            AttnModule.attention_masks = [get_attention_mask(mask_name) for mask_name in masks]
+            AttnModule.first_layers_fp = args.first_layers_fp
+            AttnModule.first_times_fp = args.first_times_fp
+            AttnModule.context_length = context_length
+            AttnModule.num_frame = num_frame
+            AttnModule.frame_size = frame_size
+
+            dense_block_mask = prepare_dense_attention(
+                    cfg_size, num_head, head_dim, dtype, device, 
+                    context_length, context_length, num_frame, frame_size
+                )
+            AttnModule.dense_block_mask = dense_block_mask
+            
+            block_mask = prepare_flexattention(
+                    cfg_size, num_head, head_dim, dtype, device, 
+                    context_length, context_length, num_frame, frame_size, 
+                    diag_width=spatial_width, multiplier=temporal_width
+                )
+            AttnModule.block_mask = block_mask
+            print(AttnModule.block_mask)
+
+            AttnModule.record_attention = args.record_attention
+            if args.record_attention:
+                # create file to record the attention
+                save_dir = "result"
+                record_path = os.path.join(save_dir, f"record_attention-{args.base_seed}.jsonl")
+                with open(record_path, "w"):
+                    pass
+                AttnModule.record_path = record_path
+                
+            replace_sparse_forward()
+            
+        # ============================== Sparse VideoGen Ends ==============================
+        
         logging.info(f"Generating {'image' if 't2i' in args.task else 'video'} ...")
         video = wan_t2v.generate(
             args.prompt,
@@ -419,7 +600,7 @@ def generate(args):
             formatted_prompt = args.prompt.replace(" ", "_").replace("/", "_")[:50]
             suffix = ".png" if "t2i" in args.task else ".mp4"
             args.save_file = (
-                f"{args.task}_{args.size.replace('*','x') if sys.platform=='win32' else args.size}_{args.ulysses_size}_{args.ring_size}_{formatted_prompt}_{formatted_time}"
+                f"{args.task}_{args.size.replace('*','x') if sys.platform=='win32' else args.size}"
                 + suffix
             )
 
@@ -447,4 +628,7 @@ def generate(args):
 
 if __name__ == "__main__":
     args = _parse_args()
+    
+    # Due to some strange problem on my machine
+    torch.backends.cuda.preferred_linalg_library(backend="magma")
     generate(args)

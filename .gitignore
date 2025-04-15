@@ -5,3 +5,4 @@ ckpts/
 output*.mp4
 result/
 Wan2.1-T2V-14B*/
+debug_tensor*/
