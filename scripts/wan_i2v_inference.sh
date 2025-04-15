@@ -9,6 +9,7 @@ prompt=$(cat examples/wan/1/prompt.txt)
 image_path="examples/wan/1/image.jpg"
 
 python wan_i2v_inference.py \
+    --model_id "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers" \
     --prompt "$prompt" \
     --image_path "$image_path" \
     --seed 0 \

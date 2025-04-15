@@ -2,5 +2,6 @@
 *.mp4
 build/
 ckpts/
-output.mp4
+output*.mp4
 result/
+Wan2.1-T2V-14B*/

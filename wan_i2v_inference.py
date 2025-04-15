@@ -15,7 +15,7 @@ from svg.models.wan.inference import replace_wan_attention
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate video from text prompt using Wan-Diffuser")
-    parser.add_argument("--model_id", type=str, default="Wan-AI/Wan2.1-T2V-14B-Diffusers", help="Model ID to use for generation")
+    parser.add_argument("--model_id", type=str, default="Wan-AI/Wan2.1-I2V-14B-720P-Diffusers", help="Model ID to use for generation")
     parser.add_argument("--data_path", type=str, default=None, help="Path of VBench I2V data suite")
     parser.add_argument("--prompt", type=str, default=None, help="Text prompt for video generation")
     parser.add_argument("--image_path", type=str, default=None, help="Path of image")
@@ -36,12 +36,11 @@ if __name__ == "__main__":
     seed_everything(args.seed)
     
     # Available models: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers, Wan-AI/Wan2.1-I2V-14B-720P-Diffusers
-    model_id = "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers"
-    image_encoder = CLIPVisionModel.from_pretrained(model_id, subfolder="image_encoder", torch_dtype=torch.float32)
-    vae = AutoencoderKLWan.from_pretrained(model_id, subfolder="vae", torch_dtype=torch.float32)
+    image_encoder = CLIPVisionModel.from_pretrained(args.model_id, subfolder="image_encoder", torch_dtype=torch.float32)
+    vae = AutoencoderKLWan.from_pretrained(args.model_id, subfolder="vae", torch_dtype=torch.float32)
     flow_shift = 5.0 # 5.0 for 720P, 3.0 for 480P
     scheduler = UniPCMultistepScheduler(prediction_type='flow_prediction', use_flow_sigmas=True, num_train_timesteps=1000, flow_shift=flow_shift)
-    pipe = WanImageToVideoPipeline.from_pretrained(model_id, vae=vae, image_encoder=image_encoder, torch_dtype=torch.bfloat16)
+    pipe = WanImageToVideoPipeline.from_pretrained(args.model_id, vae=vae, image_encoder=image_encoder, torch_dtype=torch.bfloat16)
     pipe.scheduler = scheduler
     pipe.to("cuda")
 

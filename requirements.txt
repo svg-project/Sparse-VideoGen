@@ -7,9 +7,11 @@ charset-normalizer==3.4.1
 click==8.1.8
 contourpy==1.3.1
 cycler==0.12.1
+dashscope==1.23.1
 decorator==5.1.1
 git+https://github.com/huggingface/diffusers
 docstring_parser==0.16
+easydict==1.13
 einops==0.7.0
 fastapi==0.115.6
 ffmpy==0.5.0
