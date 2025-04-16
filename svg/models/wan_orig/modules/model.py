@@ -560,6 +560,11 @@ class WanModel(ModelMixin, ConfigMixin):
 
         if y is not None:
             x = [torch.cat([u, v], dim=0) for u, v in zip(x, y)]
+            
+        # Print memory allocated in MB
+        if torch.cuda.is_available():
+            allocated_memory = torch.cuda.memory_allocated() / (1024 * 1024)
+            print(f"CUDA Memory Allocated: {allocated_memory:.2f} MB")
 
         # embeddings
         x = [self.patch_embedding(u.unsqueeze(0)) for u in x]

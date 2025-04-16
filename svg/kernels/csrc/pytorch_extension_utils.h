@@ -21,23 +21,29 @@
 			using c_type = nv_bfloat16;                             \
 			return __VA_ARGS__();                                   \
 		}                                                           \
+		case at::ScalarType::Float: {                                \
+			using c_type = float;                                   \
+			return __VA_ARGS__();                                   \
+		}                                                           \
 		default:                                                    \
 			return false;                                           \
-		}                                                           \
-	}()
+		} }()
 
-inline void check_shape(const torch::Tensor& a,
-						const torch::Tensor& b,
-						const char* a_name,
-						const char* b_name) {
+inline void check_shape(const torch::Tensor &a,
+						const torch::Tensor &b,
+						const char *a_name,
+						const char *b_name)
+{
 	TORCH_CHECK(
 		a.dim() == b.dim(), a_name, ".dim() != ", b_name, ".dim(). ", a.dim(), " vs ", b.dim());
-	for(int i = 0; i < a.dim(); ++i) {
+	for (int i = 0; i < a.dim(); ++i)
+	{
 		TORCH_CHECK(a.size(i) == b.size(i), a_name, ".size(", i, ") != ", b_name, ".size(", i, ")");
 	}
 }
 
-inline constexpr uint32_t pack_u16(uint16_t a, uint16_t b) {
+inline constexpr uint32_t pack_u16(uint16_t a, uint16_t b)
+{
 	return (uint32_t(a) << 16) | uint32_t(b);
 }
 
@@ -61,7 +67,8 @@ inline constexpr uint32_t pack_u16(uint16_t a, uint16_t b) {
 	{                                                                                       \
 		(func);                                                                             \
 		cudaError_t e = cudaGetLastError();                                                 \
-		if(e != cudaSuccess) {                                                              \
+		if (e != cudaSuccess)                                                               \
+		{                                                                                   \
 			std::ostringstream oss;                                                         \
 			oss << "CUDA Error: " << cudaGetErrorString(e) << " (" << e << ") " << __FILE__ \
 				<< ": line " << __LINE__ << " at function " << STR(func) << std::endl;      \

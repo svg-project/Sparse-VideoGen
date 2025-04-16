@@ -203,9 +203,9 @@ def sparse_attention(
         assert dtype in half_dtypes
         assert q.device.type == 'cuda' and q.size(-1) <= 256
 
-        q = q.transpose(1, 2).contiguous()
-        k = k.transpose(1, 2).contiguous()
-        v = v.transpose(1, 2).contiguous()
+        # q = q.transpose(1, 2).contiguous()
+        # k = k.transpose(1, 2).contiguous()
+        # v = v.transpose(1, 2).contiguous()
 
         # params
         b, lq, lk, out_dtype = q.size(0), q.size(1), k.size(1), q.dtype

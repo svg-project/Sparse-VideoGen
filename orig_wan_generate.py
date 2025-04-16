@@ -514,6 +514,7 @@ def generate(args):
             if args.record_attention:
                 # create file to record the attention
                 save_dir = "result"
+                os.makedirs(save_dir, exist_ok=True)
                 record_path = os.path.join(save_dir, f"record_attention-{args.base_seed}.jsonl")
                 with open(record_path, "w"):
                     pass

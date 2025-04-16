@@ -12,6 +12,7 @@ def assert_close(a, b):
     rtol, atol = {
         torch.float16: (5e-3, 5e-3),
         torch.bfloat16: (3e-2, 2e-2),
+        torch.float32: (1e-3, 1e-3),
     }[a.dtype]
     torch.testing.assert_close(a, b, rtol=rtol, atol=atol)
     

@@ -193,7 +193,7 @@ void apply_qk_rope_inplace_cossin_txtlast(torch::Tensor q,
 									head_dim,
 									at::cuda::getCurrentCUDAStream()));
 	return true; });
-	TORCH_CHECK(success, "RoPE in place apply kernel call failed");
+	TORCH_CHECK(success, "RoPE Text Last in place apply kernel call failed");
 }
 
 /*
@@ -257,5 +257,5 @@ void apply_qk_rope_inplace_cossin_complex(torch::Tensor q,
 									head_dim,
 									at::cuda::getCurrentCUDAStream()));
 		return true; });
-	TORCH_CHECK(success, "RoPE in place apply kernel call failed");
+	TORCH_CHECK(success, "RoPE Complex in place apply kernel call failed");
 }
