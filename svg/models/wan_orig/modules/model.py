@@ -9,8 +9,6 @@ from diffusers.models.modeling_utils import ModelMixin
 
 from .attention import flash_attention
 
-from ....timer import time_logging_decorator
-
 __all__ = ['WanModel']
 
 
@@ -138,39 +136,34 @@ class WanSelfAttention(nn.Module):
         """
         b, s, n, d = *x.shape[:2], self.num_heads, self.head_dim
 
-        with time_logging_decorator("selfattn - linear"):
-            # query, key, value function
-            q = self.q(x)
-            k = self.k(x)
-            v = self.v(x)
-            
-        with time_logging_decorator("selfattn - qk norm"):
-            # QK Norm
-            q = self.norm_q(q)
-            k = self.norm_k(k)
-            
-            q = q.view(b, s, n, d)
-            k = k.view(b, s, n, d)
-            v = v.view(b, s, n, d)
+        # query, key, value function
+        q = self.q(x)
+        k = self.k(x)
+        v = self.v(x)
+        
+        # QK Norm
+        q = self.norm_q(q)
+        k = self.norm_k(k)
+        
+        q = q.view(b, s, n, d)
+        k = k.view(b, s, n, d)
+        v = v.view(b, s, n, d)
 
-        with time_logging_decorator("selfattn - rope"):
-            q = rope_apply(q, grid_sizes, freqs)
-            k = rope_apply(k, grid_sizes, freqs)
+        q = rope_apply(q, grid_sizes, freqs)
+        k = rope_apply(k, grid_sizes, freqs)
 
-        with time_logging_decorator("selfattn - flash attention"):
-            x = flash_attention(
-                q=q,
-                k=k,
-                v=v,
-                k_lens=seq_lens,
-                window_size=self.window_size,
-                layer_idx=self.layer_idx,
-                timestep=t)
+        x = flash_attention(
+            q=q,
+            k=k,
+            v=v,
+            k_lens=seq_lens,
+            window_size=self.window_size,
+            layer_idx=self.layer_idx,
+            timestep=t)
 
-        with time_logging_decorator("selfattn - linear"):
-            # output
-            x = x.flatten(2)
-            x = self.o(x)
+        # output
+        x = x.flatten(2)
+        x = self.o(x)
         return x
 
 
@@ -315,42 +308,34 @@ class WanAttentionBlock(nn.Module):
             e = (self.modulation + e).chunk(6, dim=1)
         assert e[0].dtype == torch.float32
 
-        with time_logging_decorator("layer - norm & modulate"):
-            y = self.norm1(x)
-            
-            # Modulate
-            y = y.float() * (1 + e[1]) + e[0]
+        y = self.norm1(x)
         
-        with time_logging_decorator("layer - self attn"):
-            # self-attention
-            y = self.self_attn(
-                y, seq_lens, grid_sizes,
-                freqs, t)
+        # Modulate
+        y = y.float() * (1 + e[1]) + e[0]
+    
+        # self-attention
+        y = self.self_attn(
+            y, seq_lens, grid_sizes,
+            freqs, t)
         
-        with time_logging_decorator("layer - norm & modulate"):
-            # Modulate
-            with amp.autocast(dtype=torch.float32):
-                x = x + y * e[2]
+        # Modulate
+        with amp.autocast(dtype=torch.float32):
+            x = x + y * e[2]
 
-        with time_logging_decorator("layer - norm & modulate"):
-            # cross-attention
-            y = self.norm3(x)
-            
-        with time_logging_decorator("layer - cross attn"):
-            x = x + self.cross_attn(y, context, context_lens)
+        # cross-attention
+        y = self.norm3(x)
         
-        with time_logging_decorator("layer - norm & modulate"):
-            # ffn
-            y = self.norm2(x).float()
-            y = y * (1 + e[4]) + e[3]
+        x = x + self.cross_attn(y, context, context_lens)
+    
+        # ffn
+        y = self.norm2(x).float()
+        y = y * (1 + e[4]) + e[3]
         
-        with time_logging_decorator("layer - ffn"):
-            y = self.ffn(y)
-            
-        with time_logging_decorator("layer - norm & modulate"):
-            # Modulate
-            with amp.autocast(dtype=torch.float32):
-                x = x + y * e[5]
+        y = self.ffn(y)
+        
+        # Modulate
+        with amp.autocast(dtype=torch.float32):
+            x = x + y * e[5]
 
         return x
 

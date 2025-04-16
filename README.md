@@ -146,10 +146,26 @@ On a single H100, the generation should takes 4 minutes.
  - [x] Support [Wan 2.1](https://github.com/Wan-Video/Wan2.1)
  - [ ] Support [Cosmos](https://github.com/NVIDIA/Cosmos)
 
-## Latency
+## Efficiency Benchmark
+### End-to-End Speedup
+## End-to-End Speedup
+
+| Model | Task | Hardware | Resolution | Baseline (min) | SVG (min) | Speedup |
+|-------|------|----------|------------|---------------|-----------|---------|
+| HunyuanVideo | Text-to-Video | H100 | 720P | 29:57 | 15:38 | 1.91× |
+| HunyuanVideo | Text-to-Video | A100 | 720P |  |  |  |
+| Wan 2.1 | Text-to-Video | H100 | 720P | 31:35 | 20:51 | 1.51× |
+| Wan 2.1 | Text-to-Video | A100 | 720P |  |  |  |
+| Wan 2.1 | Text-to-Video | H100 | 480P | 8:05 | 6:11 | 1.32×  |
+| Wan 2.1 | Text-to-Video | A100 | 480P |  |  |  |
+| Wan 2.1 | Image-to-Video | H100 | 720P | 24:05 | 16:03 | 1.50× |
+| Wan 2.1 | Image-to-Video | A100 | 720P |  |  |  |
+
+
+### Customized Kernels Performance
 We evaluate the performance of our customized kernels against the baseline implementations. The following tables show the memory bandwidth (GB/s) comparison for different batch sizes and hidden dimensions:
 
-### RMSNorm Performance
+#### RMSNorm Performance
 
 | Batch Size | Hidden Dim | Diffusers (GB/s) | SVG Customized (GB/s) | Speedup |
 |------------|------------|------------------|----------------------|----------|
@@ -158,7 +174,7 @@ We evaluate the performance of our customized kernels against the baseline imple
 | 524,288    | 128       | 232.66           | 810.21              | 3.48×    |
 | 262,144    | 256       | 252.67           | 810.41              | 3.21×    |
 
-### LayerNorm Performance
+#### LayerNorm Performance
 
 | Batch Size | Hidden Dim | Diffusers (GB/s) | SVG Customized (GB/s) | Speedup |
 |------------|------------|------------------|----------------------|----------|

@@ -10,8 +10,8 @@ image_path="examples/wan/1/image.jpg"
 
 python wan_i2v_inference.py \
     --model_id "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers" \
-    --prompt "$prompt" \
-    --image_path "$image_path" \
+    --prompt "${prompt}" \
+    --image_path "${image_path}" \
     --seed 0 \
     --num_inference_steps 40 \
     --pattern "SVG" \
@@ -21,9 +21,9 @@ python wan_i2v_inference.py \
     --first_layers_fp $first_layers_fp
 
 # Dense Attention (Baseline)
-# python wan_i2v_inference.py \
-#     --prompt "$prompt" \
-#     --image_path "$image_path" \
-#     --seed 0 \
-#     --num_inference_steps 40 \
-#     --pattern "dense"
+python wan_i2v_inference.py \
+    --prompt "${prompt}" \
+    --image_path "${image_path}" \
+    --seed 0 \
+    --num_inference_steps 40 \
+    --pattern "dense"

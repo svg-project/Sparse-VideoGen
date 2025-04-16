@@ -10,7 +10,6 @@ from diffusers.models.modeling_utils import ModelMixin
 
 from .attention import sparse_attention
 
-from ....timer import time_logging_decorator
 from .model import WanRMSNorm, WanSelfAttention, WanModel, sinusoidal_embedding_1d
 
 __all__ = ["WanModel"]
@@ -20,7 +19,8 @@ try:
     import _kernels
     
     from .model import rope_apply
-
+    
+    @amp.autocast(enabled=False)
     def _get_freqs(freqs, grid_sizes, c):
         f, h, w = grid_sizes[0].tolist()
         seq_len = f * h * w
@@ -39,6 +39,7 @@ try:
 
         return freqs
 
+    @amp.autocast(enabled=False)
     def apply_rotary_emb(query: torch.Tensor, key: torch.Tensor, grid_sizes: torch.Tensor, freqs: torch.Tensor):
         n, c = query.size(2), query.size(3) // 2
 
@@ -58,6 +59,7 @@ except ImportError:
     )
 
     # This function is equivalent to rope_apply in the model.py file. We rewrite it to use _get_freqs.
+    @amp.autocast(enabled=False)
     def rope_apply(x, grid_sizes, freqs):
         n, c = x.size(2), x.size(3) // 2
         freqs = _get_freqs(freqs, grid_sizes, c)
@@ -71,6 +73,7 @@ except ImportError:
 
         return x_out.float()
     
+    @amp.autocast(enabled=False)
     def apply_rotary_emb(query: torch.Tensor, key: torch.Tensor, grid_sizes: torch.Tensor, freqs: torch.Tensor):
         query = rope_apply(query, grid_sizes, freqs)
         key = rope_apply(key, grid_sizes, freqs)
@@ -112,46 +115,41 @@ class WanSelfAttention_Sparse(nn.Module):
         """
         b, s, n, d = *x.shape[:2], self.num_heads, self.head_dim
 
-        with time_logging_decorator("selfattn - linear"):
-            # query, key, value function
-            q = self.q(x)
-            k = self.k(x)
-            v = self.v(x)
+        # query, key, value function
+        q = self.q(x)
+        k = self.k(x)
+        v = self.v(x)
 
-        with time_logging_decorator("selfattn - qk norm"):
-            # QK Norm. The output is torch.float32
-            q = self.norm_q(q)
-            k = self.norm_k(k)
+        # QK Norm. The output is torch.float32
+        q = self.norm_q(q)
+        k = self.norm_k(k)
 
-            q = q.view(b, s, n, d)
-            k = k.view(b, s, n, d)
-            v = v.view(b, s, n, d)
+        q = q.view(b, s, n, d)
+        k = k.view(b, s, n, d)
+        v = v.view(b, s, n, d)
 
-            # [B, S, N, D] -> [B, N, S, D]
-            q = q.transpose(1, 2).contiguous()
-            k = k.transpose(1, 2).contiguous()
-            v = v.transpose(1, 2).contiguous()
+        # [B, S, N, D] -> [B, N, S, D]
+        q = q.transpose(1, 2).contiguous()
+        k = k.transpose(1, 2).contiguous()
+        v = v.transpose(1, 2).contiguous()
 
-        with time_logging_decorator("selfattn - rope"):
-            q, k = apply_rotary_emb(q, k, grid_sizes, freqs)
-            # q = rope_apply(q, grid_sizes, freqs)
-            # k = rope_apply(k, grid_sizes, freqs)
+        q, k = apply_rotary_emb(q, k, grid_sizes, freqs)
+        # q = rope_apply(q, grid_sizes, freqs)
+        # k = rope_apply(k, grid_sizes, freqs)
 
-        with time_logging_decorator("selfattn - flash attention"):
-            x = sparse_attention(
-                q=q,
-                k=k,
-                v=v,
-                k_lens=seq_lens,
-                window_size=self.window_size,
-                layer_idx=self.layer_idx,
-                timestep=t,
-            )
+        x = sparse_attention(
+            q=q,
+            k=k,
+            v=v,
+            k_lens=seq_lens,
+            window_size=self.window_size,
+            layer_idx=self.layer_idx,
+            timestep=t,
+        )
 
-        with time_logging_decorator("selfattn - linear"):
-            # output
-            x = x.flatten(2)
-            x = self.o(x)
+        # output
+        x = x.flatten(2)
+        x = self.o(x)
         return x
 
 class WanModel_Sparse(WanModel):

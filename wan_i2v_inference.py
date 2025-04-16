@@ -44,7 +44,7 @@ if __name__ == "__main__":
     pipe.scheduler = scheduler
     pipe.to("cuda")
 
-    if args.prompt is None:
+    if args.prompt is not None:
         assert args.image_path is not None, "Image path must be provided"
         image = load_image(args.image_path)
 
