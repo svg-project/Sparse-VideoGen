@@ -4,7 +4,7 @@ This guide provides solutions for common installation and setup issues.
 
 ## Installing Git Large File Storage (Git LFS)
 
-Git LFS is required for handling large files in the repository. If you do not have sudo, you can refer to [this guide]( https://gist.github.com/pourmand1376/bc48a407f781d6decae316a5cfa7d8ab).
+Git LFS is required for handling large files in the repository. If you do not have sudo, you can refer to [this guide]( https://gist.github.com/pourmand1376/bc48a407f781d6decae316a5cfa7d8ab) or [this guide](https://github.com/git-lfs/git-lfs/issues/5955).
 
 ## GLIBCXX Version Error
 
