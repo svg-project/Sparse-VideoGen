@@ -18,9 +18,9 @@ python wan_t2v_inference.py \
     --first_times_fp $first_times_fp \
     --first_layers_fp $first_layers_fp
 
-# # 720p Dense Attention (Baseline)
-# python wan_t2v_inference.py \
-#     --prompt "$prompt" \
-#     --height 720 \
-#     --width 1280 \
-#     --pattern "dense"
+# 720p Dense Attention (Baseline)
+python wan_t2v_inference.py \
+    --prompt "$prompt" \
+    --height 720 \
+    --width 1280 \
+    --pattern "dense"

@@ -36,7 +36,7 @@ cd Sparse-VideoGen
 We recommend using CUDA versions 12.4 / 12.8 + PyTorch versions 2.5.1 / 2.6.0
 ```bash
 # 1. Create and activate conda environment
-conda create -n SVG python==3.10.9
+conda create -n SVG python==3.10.9 # or 3.11.9 if have error when installing kernels
 conda activate SVG
 
 # 2. Install PyTorch
@@ -153,13 +153,13 @@ On a single H100, the generation should takes 4 minutes.
 | Model | Task | Hardware | Resolution | Baseline (min) | SVG (min) | Speedup |
 |-------|------|----------|------------|---------------|-----------|---------|
 | HunyuanVideo | Text-to-Video | H100 | 720P | 29:57 | 15:38 | 1.91× |
-| HunyuanVideo | Text-to-Video | A100 | 720P |  |  |  |
+| HunyuanVideo | Text-to-Video | A100 | 720P | 50:48 | 30:14 | 1.68× |
 | Wan 2.1 | Text-to-Video | H100 | 720P | 31:35 | 20:51 | 1.51× |
-| Wan 2.1 | Text-to-Video | A100 | 720P |  |  |  |
+| Wan 2.1 | Text-to-Video | A100 | 720P | 57:57 | 42:59 | 1.35× |
 | Wan 2.1 | Text-to-Video | H100 | 480P | 8:05 | 6:11 | 1.32×  |
-| Wan 2.1 | Text-to-Video | A100 | 480P |  |  |  |
+| Wan 2.1 | Text-to-Video | A100 | 480P | 15:41 | 13:00 | 1.20× |
 | Wan 2.1 | Image-to-Video | H100 | 720P | 24:05 | 16:03 | 1.50× |
-| Wan 2.1 | Image-to-Video | A100 | 720P |  |  |  |
+| Wan 2.1 | Image-to-Video | A100 | 720P | 45:19 | 34:27 | 1.32× |
 
 
 ### Customized Kernels Performance
