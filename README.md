@@ -10,6 +10,7 @@ Accelerate Video Generation with High Pixel-level Fidelity
 </p>
 
 ## 🔥News🔥
+- [2025/05] Sparse VideoGen is accepted by ICML 2025!
 - [2025/04] Wan 2.1 is supported! Both T2V and I2V are accelerated.
 - [2025/03] Sparse VideoGen is open-sourced! HunyuanVideo and CogVideoX v1.5 can be accelerated by 2×
 
