@@ -154,12 +154,12 @@ If you find Sparse VideoGen useful for your research and applications or interes
   author={Xi, Haocheng and Yang, Shuo and Zhao, Yilong and Xu, Chenfeng and Li, Muyang and Li, Xiuyu and Lin, Yujun and Cai, Han and Zhang, Jintao and Li, Dacheng and others},
   journal={arXiv preprint arXiv:2502.01776},
   year={2025}
+}
 
 @article{yang2025sparse,
   title={Sparse VideoGen2: Accelerate Video Generation with Sparse Attention via Semantic-Aware Permutation},
   author={Yang, Shuo and Xi, Haocheng and Zhao, Yilong and Li, Muyang and Zhang, Jintao and Cai, Han and Lin, Yujun and Li, Xiuyu and Xu, Chenfeng and Peng, Kelly and others},
   journal={arXiv preprint arXiv:2505.18875},
   year={2025}
-}
 }
 ```
