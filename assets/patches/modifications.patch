@@ -1,0 +1,102 @@
+diff --git a/flashinfer/sparse.py b/flashinfer/sparse.py
+index 51c9d04..518c706 100644
+--- a/flashinfer/sparse.py
++++ b/flashinfer/sparse.py
+@@ -18,6 +18,8 @@ import math
+ from typing import Optional, Tuple, Union
+ 
+ import torch
++import triton
++import triton.language as tl
+ 
+ from .decode import get_batch_decode_module
+ from .page import block_sparse_indices_to_vector_sparse_offsets
+@@ -687,6 +689,34 @@ class BlockSparseAttentionWrapper:
+         pass
+ 
+ 
++@triton.jit
++def _kvidx_kernel(
++    base_ptr,
++    base_off_ptr,
++    lengths_ptr,
++    kv_indices_ptr,
++    MAX_BLOCK_SIZE2: tl.constexpr, # Largest length
++):
++    pid = tl.program_id(0)
++    
++    tl.static_assert(lengths_ptr.dtype.element_ty == tl.int32)
++    tl.static_assert(base_ptr.dtype.element_ty == tl.int64)
++    
++    base = tl.load(base_ptr + pid)
++    base_off = tl.load(base_off_ptr + pid)
++    length = tl.load(lengths_ptr + pid)
++
++    offset = tl.arange(0, MAX_BLOCK_SIZE2)
++    off_mask = offset < length
++    
++    kv_indices_ptr += base_off
++    kv_idx = base + offset
++    
++    tl.store(kv_indices_ptr + offset, kv_idx, mask=off_mask)
++    
++from svg.timer import time_logging_decorator
++
++
+ class VariableBlockSparseAttentionWrapper:
+     r"""Wrapper class for attention computation with a block-sparse matrix as attention mask.
+     This API supports variable block sizes provided by ``block_row_sz`` and ``block_col_sz``.
+@@ -943,11 +973,27 @@ class VariableBlockSparseAttentionWrapper:
+             lengths = block_col_sz[h_idx, c_idx].to(dtype_i)  # [N]
+             base = head_offset[h_idx] + col_offset[h_idx, c_idx]  # [N]
+ 
++            # # 4) Expand variable-length column blocks into token-level indices
++            # cum = torch.cumsum(lengths, 0)
++            # starts = torch.repeat_interleave(cum - lengths, lengths)  # [total]
++            # offsets_within = torch.arange(cum[-1], device=device) - starts
++            # kv_indices = torch.repeat_interleave(base, lengths) + offsets_within
++            
+             # 4) Expand variable-length column blocks into token-level indices
+-            cum = torch.cumsum(lengths, 0)
+-            starts = torch.repeat_interleave(cum - lengths, lengths)  # [total]
+-            offsets_within = torch.arange(cum[-1], device=device) - starts
+-            kv_indices = torch.repeat_interleave(base, lengths) + offsets_within
++            cum, num_blocks = torch.cumsum(lengths, 0), lengths.numel()
++            total_len = cum[-1]
++            base_off = torch.cat([torch.zeros(1, dtype=dtype_i, device=device), cum[:-1]])
++            kv_indices = torch.zeros(total_len, dtype=dtype_i, device=device)
++            
++            MAX_BLOCK_SIZE2 = int(triton.next_power_of_2(lengths.max()))
++
++            _kvidx_kernel[(num_blocks,)](
++                base, # int64
++                base_off, # int64
++                lengths, # int32
++                kv_indices, # int32
++                MAX_BLOCK_SIZE2,
++            )
+ 
+             return kv_indptr.to(dtype=dtype_i, device=device), kv_indices.to(
+                 dtype=dtype_i, device=device
+@@ -956,8 +1002,9 @@ class VariableBlockSparseAttentionWrapper:
+         kv_indptr, kv_indices = _block_mask_map_to_expanded_indices(
+             block_mask_map, block_col_sz
+         )
++        
+         kv_indptr_host = kv_indptr.to("cpu", non_blocking=non_blocking)
+-        kv_indices_host = kv_indices.to("cpu", non_blocking=non_blocking)
++        # kv_indices_host = kv_indices.to("cpu", non_blocking=non_blocking)
+ 
+         self._qo_indptr = qo_indptr.to(self.device, non_blocking=non_blocking)
+         self._paged_kv_indptr_buf = kv_indptr.to(self.device, non_blocking=non_blocking)
+@@ -976,8 +1023,8 @@ class VariableBlockSparseAttentionWrapper:
+         ), "num_qo_heads must be a multiple of num_kv_heads"
+         assert num_blocks_row * num_kv_heads + 1 == kv_indptr_host.shape[0]
+         assert (
+-            kv_indptr_host[-1].item() == kv_indices_host.shape[0]
+-        ), f"{kv_indptr_host[-1].item()} != {kv_indices_host.shape[0]}"
++            kv_indptr_host[-1].item() == kv_indices.shape[0]
++        ), f"{kv_indptr_host[-1].item()} != {kv_indices.shape[0]}"
+         assert num_kv_heads == block_mask_map.shape[0]
+         assert num_kv_heads == block_row_sz.shape[0]
+         assert num_kv_heads == block_col_sz.shape[0]

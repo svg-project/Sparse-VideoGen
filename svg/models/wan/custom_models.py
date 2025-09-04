@@ -1,11 +1,24 @@
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Union
 
 import torch
-from torch import nn
-
-from diffusers.models.transformers.transformer_wan import WanTransformerBlock, WanTransformer3DModel
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
-from diffusers.utils import USE_PEFT_BACKEND, logging, scale_lora_layers, unscale_lora_layers
+from diffusers.models.normalization import FP32LayerNorm
+from diffusers.models.transformers.transformer_wan import (
+    WanTransformer3DModel,
+    WanTransformerBlock,
+)
+from diffusers.utils import (
+    USE_PEFT_BACKEND,
+    scale_lora_layers,
+    unscale_lora_layers,
+)
+
+from ...kernels.triton.layernorm import triton_layernorm_forward
+from ...kernels.triton.modulate import triton_modulate_gate_residual_forward, triton_modulate_shift_forward
+from ...logger import logger
+from ...timer import time_logging_decorator
+from .attention import ENABLE_FAST_KERNEL
+
 
 class WanTransformerBlock_Sparse(WanTransformerBlock):
     def forward(
@@ -14,30 +27,91 @@ class WanTransformerBlock_Sparse(WanTransformerBlock):
         encoder_hidden_states: torch.Tensor,
         temb: torch.Tensor,
         rotary_emb: torch.Tensor,
-        timestep: int = 0
+        timestep: int = 0,
     ) -> torch.Tensor:
         shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = (
             self.scale_shift_table + temb.float()
         ).chunk(6, dim=1)
 
         # 1. Self-attention
-        norm_hidden_states = (self.norm1(hidden_states.float()) * (1 + scale_msa) + shift_msa).type_as(hidden_states)
-        attn_output = self.attn1(hidden_states=norm_hidden_states, rotary_emb=rotary_emb, timestep=timestep)
-        hidden_states = (hidden_states.float() + attn_output * gate_msa).type_as(hidden_states)
+        with time_logging_decorator("Level 1 - layernorm"):
+            if isinstance(self.norm1, FP32LayerNorm):
+                if ENABLE_FAST_KERNEL:
+                    norm_hidden_states = triton_layernorm_forward(
+                        hidden_states, self.norm1.weight, self.norm1.bias, self.norm1.eps, self.norm1.elementwise_affine
+                    )
+                else:
+                    norm_hidden_states = self.norm1(hidden_states.float())
+            else:
+                raise ValueError(f"Unsupported norm type: {type(self.norm1)}")
+
+        with time_logging_decorator("Level 1 - modulate"):
+            if ENABLE_FAST_KERNEL:
+                norm_hidden_states = triton_modulate_shift_forward(
+                    norm_hidden_states, scale_msa, shift_msa, output_dtype=hidden_states.dtype
+                )
+            else:
+                norm_hidden_states = (norm_hidden_states * (1 + scale_msa) + shift_msa).type_as(hidden_states)
+
+        with time_logging_decorator("Level 1 - self attn"):
+            attn_output = self.attn1(hidden_states=norm_hidden_states, rotary_emb=rotary_emb, timestep=timestep)
+        with time_logging_decorator("Level 1 - misc"):
+            if ENABLE_FAST_KERNEL:
+                hidden_states = triton_modulate_gate_residual_forward(
+                    hidden_states, attn_output, gate_msa, output_dtype=hidden_states.dtype
+                )
+            else:
+                hidden_states = (hidden_states.float() + attn_output * gate_msa).type_as(hidden_states)
 
         # 2. Cross-attention
-        norm_hidden_states = self.norm2(hidden_states.float()).type_as(hidden_states)
-        attn_output = self.attn2(hidden_states=norm_hidden_states, encoder_hidden_states=encoder_hidden_states)
-        hidden_states = hidden_states + attn_output
+        with time_logging_decorator("Level 1 - layernorm"):
+            if isinstance(self.norm2, FP32LayerNorm):
+                if ENABLE_FAST_KERNEL:
+                    norm_hidden_states = triton_layernorm_forward(
+                        hidden_states, self.norm2.weight, self.norm2.bias, self.norm2.eps, self.norm2.elementwise_affine
+                    ).type_as(hidden_states)
+                else:
+                    norm_hidden_states = self.norm2(hidden_states.float()).type_as(hidden_states)
+            else:
+                raise ValueError(f"Unsupported norm type: {type(self.norm2)}")
+
+        with time_logging_decorator("Level 1 - cross attn"):
+            attn_output = self.attn2(hidden_states=norm_hidden_states, encoder_hidden_states=encoder_hidden_states)
+        with time_logging_decorator("Level 1 - misc"):
+            hidden_states = hidden_states + attn_output
 
         # 3. Feed-forward
-        norm_hidden_states = (self.norm3(hidden_states.float()) * (1 + c_scale_msa) + c_shift_msa).type_as(
-            hidden_states
-        )
-        ff_output = self.ffn(norm_hidden_states)
-        hidden_states = (hidden_states.float() + ff_output.float() * c_gate_msa).type_as(hidden_states)
+        with time_logging_decorator("Level 1 - layernorm"):
+            if isinstance(self.norm3, FP32LayerNorm):
+                if ENABLE_FAST_KERNEL:
+                    norm_hidden_states = triton_layernorm_forward(
+                        hidden_states, self.norm3.weight, self.norm3.bias, self.norm3.eps, self.norm3.elementwise_affine
+                    )
+                else:
+                    norm_hidden_states = self.norm3(hidden_states.float())
+            else:
+                raise ValueError(f"Unsupported norm type: {type(self.norm3)}")
+
+        with time_logging_decorator("Level 1 - modulate"):
+            if ENABLE_FAST_KERNEL:
+                norm_hidden_states = triton_modulate_shift_forward(
+                    norm_hidden_states, c_scale_msa, c_shift_msa, output_dtype=hidden_states.dtype
+                )
+            else:
+                norm_hidden_states = (norm_hidden_states * (1 + c_scale_msa) + c_shift_msa).type_as(hidden_states)
+
+        with time_logging_decorator("Level 1 - ffn"):
+            ff_output = self.ffn(norm_hidden_states)
+        with time_logging_decorator("Level 1 - misc"):
+            if ENABLE_FAST_KERNEL:
+                hidden_states = triton_modulate_gate_residual_forward(
+                    hidden_states, ff_output, c_gate_msa, output_dtype=hidden_states.dtype
+                )
+            else:
+                hidden_states = (hidden_states.float() + ff_output.float() * c_gate_msa).type_as(hidden_states)
 
         return hidden_states
+
 
 class WanTransformer3DModel_Sparse(WanTransformer3DModel):
     def forward(
@@ -60,9 +134,7 @@ class WanTransformer3DModel_Sparse(WanTransformer3DModel):
             scale_lora_layers(self, lora_scale)
         else:
             if attention_kwargs is not None and attention_kwargs.get("scale", None) is not None:
-                logger.warning(
-                    "Passing `scale` via `attention_kwargs` when not using the PEFT backend is ineffective."
-                )
+                logger.warning("Passing `scale` via `attention_kwargs` when not using the PEFT backend is ineffective.")
 
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.config.patch_size
@@ -72,8 +144,14 @@ class WanTransformer3DModel_Sparse(WanTransformer3DModel):
 
         rotary_emb = self.rope(hidden_states)
 
+        if ENABLE_FAST_KERNEL:
+            # Required for Sparse VideoGen Fast RoPE
+            rot_real = rotary_emb.real.squeeze(0).squeeze(0).contiguous().to(torch.float32)
+            rot_imag = rotary_emb.imag.squeeze(0).squeeze(0).contiguous().to(torch.float32)
+            rotary_emb = (rot_real, rot_imag)
+
         hidden_states = self.patch_embedding(hidden_states)
-        hidden_states = hidden_states.flatten(2).transpose(1, 2)
+        hidden_states = hidden_states.flatten(2).transpose(1, 2).contiguous()
 
         temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(
             timestep, encoder_hidden_states, encoder_hidden_states_image
@@ -92,11 +170,7 @@ class WanTransformer3DModel_Sparse(WanTransformer3DModel):
         else:
             for block in self.blocks:
                 hidden_states = block(
-                    hidden_states, 
-                    encoder_hidden_states, 
-                    timestep_proj, 
-                    rotary_emb,
-                    timestep=timestep
+                    hidden_states, encoder_hidden_states, timestep_proj, rotary_emb, timestep=timestep
                 )
 
         # 5. Output norm, projection & unpatchify
