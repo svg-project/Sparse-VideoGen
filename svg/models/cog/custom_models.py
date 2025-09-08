@@ -21,6 +21,16 @@ from torch import nn
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.utils import USE_PEFT_BACKEND, is_torch_version, logging, scale_lora_layers, unscale_lora_layers
 from diffusers.models.transformers.cogvideox_transformer_3d import CogVideoXBlock, CogVideoXTransformer3DModel
+import torch.distributed as dist
+
+try:
+    from xfuser.core.distributed import (
+        get_ulysses_parallel_world_size,
+        get_ulysses_parallel_rank,
+        get_sp_group
+    )
+except:
+    pass
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -121,6 +131,16 @@ class CogVideoXTransformer3DModel_Sparse(CogVideoXTransformer3DModel):
         encoder_hidden_states = hidden_states[:, :text_seq_length]
         hidden_states = hidden_states[:, text_seq_length:]
 
+        if dist.is_initialized() and get_ulysses_parallel_world_size() > 1:
+            encoder_hidden_states = torch.chunk(encoder_hidden_states, get_ulysses_parallel_world_size(), dim=-2)[get_ulysses_parallel_rank()]
+            # split video latents on dim TS
+            hidden_states = torch.chunk(hidden_states, get_ulysses_parallel_world_size(), dim=-2)[get_ulysses_parallel_rank()]
+            # image_rotary_emb should be splited in sequence dim
+            image_rotary_emb = (
+                torch.chunk(image_rotary_emb[0], get_ulysses_parallel_world_size(), dim=-2)[get_ulysses_parallel_rank()],
+                torch.chunk(image_rotary_emb[1], get_ulysses_parallel_world_size(), dim=-2)[get_ulysses_parallel_rank()],
+            )
+
         # 3. Transformer blocks
         for i, block in enumerate(self.transformer_blocks):
             if torch.is_grad_enabled() and self.gradient_checkpointing:
@@ -156,11 +176,17 @@ class CogVideoXTransformer3DModel_Sparse(CogVideoXTransformer3DModel):
             # CogVideoX-5B
             hidden_states = torch.cat([encoder_hidden_states, hidden_states], dim=1)
             hidden_states = self.norm_final(hidden_states)
+            if dist.is_initialized() and get_ulysses_parallel_world_size() > 1:
+                assert text_seq_length % get_ulysses_parallel_world_size() == 0
+                text_seq_length = text_seq_length // get_ulysses_parallel_world_size()
             hidden_states = hidden_states[:, text_seq_length:]
 
         # 4. Final block
         hidden_states = self.norm_out(hidden_states, temb=emb)
         hidden_states = self.proj_out(hidden_states)
+
+        if dist.is_initialized() and get_ulysses_parallel_world_size() > 1:
+            hidden_states = get_sp_group().all_gather(hidden_states, dim=-2)
 
         # 5. Unpatchify
         p = self.config.patch_size

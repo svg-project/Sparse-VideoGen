@@ -11,6 +11,7 @@ from torch.nn.attention.flex_attention import (
 
 from .placement import sparse_head_placement, hidden_states_placement, ref_sparse_head_placement, ref_hidden_states_placement
 from .utils import generate_temporal_head_mask_mod, create_block_mask_cached
+import torch.distributed as dist
 
 try:
     sys.path.append('svg/kernels/build/')
@@ -44,7 +45,11 @@ except ImportError:
         key[:, :, text_seq_length:] = apply_rotary_emb(key[:, :, text_seq_length:], image_rotary_emb)
         return query, key
 
-
+try:
+    from xfuser.core.distributed import get_ulysses_parallel_world_size
+    from xfuser.model_executor.layers.usp import _ft_c_input_all_to_all, _ft_c_output_all_to_all
+except:
+    pass
 
 flex_attention = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
 torch._dynamo.config.cache_size_limit = 192 * 3
@@ -71,6 +76,11 @@ class CogVideoX_SparseAttn_Processor2_0:
     
     def __init__(self, layer_idx):
         self.layer_idx = layer_idx
+ 
+        self.use_sp = False
+        if dist.is_initialized() and get_ulysses_parallel_world_size() > 1:
+            self.use_sp = True
+
         if not hasattr(F, "scaled_dot_product_attention"):
             raise ImportError("CogVideoXAttnProcessor requires PyTorch 2.0, to use it, please upgrade PyTorch to 2.0.")
 
@@ -232,7 +242,41 @@ class CogVideoX_SparseAttn_Processor2_0:
         query, key = rotary_emb(image_rotary_emb, query, key, text_seq_length)
         
         # ========================================================================
-        hidden_states = self.attention_core_logic(query, key, value, timestep)
+        if self.use_sp:
+            # input qkv ulysses all_to_all comm 
+            query_text = query[:,:,:text_seq_length,:]
+            # Ugly but useful for MMDiT. 
+            # TODO: handle layout inside all_to_all for cleaner code
+            # for sparse attention,the layout of sequence must be [text_1, text_2, ...,  video_1, video_2, ...],
+            # [text_1, video_1, text_2, video_2, ...] will lead to different attention map
+            query_latents = query[:,:,text_seq_length:,:]
+            query_text = _ft_c_input_all_to_all(query_text)
+            query_latents = _ft_c_input_all_to_all(query_latents)
+            query = torch.cat([query_text, query_latents], dim=-2)
+
+            key_text = key[:,:,:text_seq_length,:]
+            key_latents = key[:,:,text_seq_length:,:]
+            key_text = _ft_c_input_all_to_all(key_text)
+            key_latents = _ft_c_input_all_to_all(key_latents)
+            key = torch.cat([key_text, key_latents], dim=-2)
+
+            value_text = value[:,:,:text_seq_length,:]
+            value_latents = value[:,:,text_seq_length:,:]
+            value_text = _ft_c_input_all_to_all(value_text)
+            value_latents = _ft_c_input_all_to_all(value_latents)
+            value = torch.cat([value_text, value_latents], dim=-2)
+
+            out = self.attention_core_logic(query, key, value, timestep)
+
+            # output o ulysses all_to_all comm 
+            out_text = out[:,:,:get_ulysses_parallel_world_size()*text_seq_length,:]
+            out_latents = out[:,:,get_ulysses_parallel_world_size()*text_seq_length:,:]
+            out_text = _ft_c_output_all_to_all(out_text)
+            out_latents = _ft_c_output_all_to_all(out_latents)
+            hidden_states = torch.cat([out_text, out_latents], dim=-2)
+
+        else:
+            hidden_states = self.attention_core_logic(query, key, value, timestep)
         # ========================================================================
 
         hidden_states = self.get_o(attn, hidden_states, batch_size, head_dim)
