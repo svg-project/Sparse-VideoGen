@@ -18,6 +18,13 @@ from .mlp_layers import MLP, MLPEmbedder, FinalLayer
 from .modulate_layers import ModulateDiT, modulate, apply_gate
 from .token_refiner import SingleTokenRefiner
 from .models import MMDoubleStreamBlock, MMSingleStreamBlock
+import torch.distributed as dist
+
+try:
+    from xfuser.core.distributed import get_ulysses_parallel_world_size
+    from xfuser.model_executor.layers.usp import _ft_c_input_all_to_all, _ft_c_output_all_to_all
+except:
+    pass
 
 try:
     import sys
@@ -175,6 +182,10 @@ class MMDoubleStreamBlock_Sparse(MMDoubleStreamBlock):
         txt_k = self.txt_attn_k_norm(txt_k).to(txt_v)
 
         # Run actual attention.
+        if dist.is_initialized() and get_ulysses_parallel_world_size() > 1:
+            # all_to_all comm : gather in sequence dim and scatter in num_heads dim 
+            img_q, txt_q, img_k, txt_k, img_v, txt_v = hunyuan_uly_comm_before_attention(img_q, txt_q, img_k, txt_k, img_v, txt_v)
+
         q = torch.cat((img_q, txt_q), dim=1)
         k = torch.cat((img_k, txt_k), dim=1)
         v = torch.cat((img_v, txt_v), dim=1)
@@ -183,36 +194,29 @@ class MMDoubleStreamBlock_Sparse(MMDoubleStreamBlock):
         ), f"cu_seqlens_q.shape:{cu_seqlens_q.shape}, img.shape[0]:{img.shape[0]}"
 
         # attention computation start
-        if not self.hybrid_seq_parallel_attn:
-            attn = attention(
-                q,
-                k,
-                v,
-                mode="sparse",
-                cu_seqlens_q=cu_seqlens_q,
-                cu_seqlens_kv=cu_seqlens_kv,
-                max_seqlen_q=max_seqlen_q,
-                max_seqlen_kv=max_seqlen_kv,
-                batch_size=img_k.shape[0],
-                timestep=timestep,
-                layer_idx=self.layer_idx
-            )
-        else:
-            attn = parallel_attention(
-                self.hybrid_seq_parallel_attn,
-                q,
-                k,
-                v,
-                img_q_len=img_q.shape[1],
-                img_kv_len=img_k.shape[1],
-                cu_seqlens_q=cu_seqlens_q,
-                cu_seqlens_kv=cu_seqlens_kv
-            )
+        attn = attention(
+            q,
+            k,
+            v,
+            mode="sparse",
+            cu_seqlens_q=cu_seqlens_q,
+            cu_seqlens_kv=cu_seqlens_kv,
+            max_seqlen_q=max_seqlen_q,
+            max_seqlen_kv=max_seqlen_kv,
+            batch_size=img_k.shape[0],
+            timestep=timestep,
+            layer_idx=self.layer_idx
+        )
     
         # attention computation end
 
         img_attn, txt_attn = attn[:, : img.shape[1]], attn[:, img.shape[1] :]
 
+        if dist.is_initialized() and get_ulysses_parallel_world_size() > 1:
+            img_attn, txt_attn = attn[:, : img.shape[1] * get_ulysses_parallel_world_size()], attn[:, img.shape[1]* get_ulysses_parallel_world_size() :]
+            # all_to_all comm : gather in num_heads dim and scatter in sequence dim 
+            img_attn, txt_attn = hunyuan_uly_comm_after_attention(img_attn, txt_attn)
+        
         # Calculate the img bloks.
         img = img + apply_gate(self.img_attn_proj(img_attn), gate=img_mod1_gate)
         img = img + apply_gate(
@@ -273,6 +277,19 @@ class MMSingleStreamBlock_Sparse(MMSingleStreamBlock):
             cu_seqlens_q.shape[0] == 2 * x.shape[0] + 1
         ), f"cu_seqlens_q.shape:{cu_seqlens_q.shape}, x.shape[0]:{x.shape[0]}"
 
+        if dist.is_initialized() and get_ulysses_parallel_world_size() > 1:
+            # Ulysses comm
+            img_q, txt_q = q[:, :-txt_len ], q[:, -txt_len:]
+            img_k, txt_k = k[:, :-txt_len ], k[:, -txt_len:]
+            img_v, txt_v = v[:, :-txt_len ], v[:, -txt_len:]
+
+            # all_to_all comm : gather in sequence dim and scatter in num_heads dim 
+            img_q, txt_q, img_k, txt_k, img_v, txt_v = hunyuan_uly_comm_before_attention(img_q, txt_q, img_k, txt_k, img_v, txt_v)
+        
+            q = torch.cat((img_q, txt_q), dim=1)
+            k = torch.cat((img_k, txt_k), dim=1)
+            v = torch.cat((img_v, txt_v), dim=1)
+
         # attention computation start
         attn = attention(
             q,
@@ -288,11 +305,66 @@ class MMSingleStreamBlock_Sparse(MMSingleStreamBlock):
             layer_idx=self.layer_idx
         )
         # attention computation end
+        if dist.is_initialized() and get_ulysses_parallel_world_size() > 1:
+            txt_len *= get_ulysses_parallel_world_size()
+            img_attn, txt_attn = attn[:, :-txt_len ], attn[:, -txt_len:]
+            # all_to_all comm : gather in num_heads dim and scatter in sequence dim 
+            img_attn, txt_attn = hunyuan_uly_comm_after_attention(img_attn, txt_attn)
+            attn = torch.cat((img_attn, txt_attn), dim=1)
 
         # Compute activation in mlp stream, cat again and run second linear layer.
         output = self.linear2(torch.cat((attn, self.mlp_act(mlp)), 2))
 
         return x + apply_gate(output, gate=mod_gate)
+
+"""
+    NOTE: The complexity of this parallel implementation stems from the requirement of current 
+    svg kernel that the sequence layout must be [video_1, video_2, ..., text_1, text_2, ...]. 
+    Directly applying all_to_all to the complete MMDiT sequence would result in 
+    [video_1, text_1, video_2, text_2, ...], which would produce different attention maps.
+
+    For efficiency, these rearrange operations should ideally be merged with the 
+    pre_attn_layout and post_attn_layout functions in svg/models/hyvideo/modules/attention.py. 
+    However, explicit rearrange operations are used here to maintain code readability.
+
+    A more elegant implementation could utilize videosys library's all_to_all_with_pad 
+    function, which allows flexible selection of scatter_dim and gather_dim. The current 
+    implementation follows xdit's approach for consistency.
+"""
+def hunyuan_uly_comm_before_attention(query_video, query_text, key_video, key_text, value_video, value_text):
+    query_text = rearrange(query_text, "b s h d" " -> b h s d").contiguous()
+    query_video = rearrange(query_video, "b s h d" " -> b h s d").contiguous()
+    query_text = _ft_c_input_all_to_all(query_text)
+    query_video = _ft_c_input_all_to_all(query_video)
+    query_text = rearrange(query_text, "b h s d -> b s h d")
+    query_video = rearrange(query_video, "b h s d -> b s h d")
+
+    key_text = rearrange(key_text, "b s h d" " -> b h s d").contiguous()
+    key_video = rearrange(key_video, "b s h d" " -> b h s d").contiguous()
+    key_text = _ft_c_input_all_to_all(key_text)
+    key_video = _ft_c_input_all_to_all(key_video)
+    key_text = rearrange(key_text, "b h s d -> b s h d")
+    key_video = rearrange(key_video, "b h s d -> b s h d")
+
+    value_text = rearrange(value_text, "b s h d" " -> b h s d").contiguous()
+    value_video = rearrange(value_video, "b s h d" " -> b h s d").contiguous()
+    value_text = _ft_c_input_all_to_all(value_text)
+    value_video = _ft_c_input_all_to_all(value_video)
+    value_text = rearrange(value_text, "b h s d -> b s h d")
+    value_video = rearrange(value_video, "b h s d -> b s h d")
+
+    return query_video, query_text, key_video, key_text, value_video, value_text
+
+
+def hunyuan_uly_comm_after_attention(out_video, out_text):
+    out_text = rearrange(out_text, "b s (h d)" " -> b h s d",d=128).contiguous()
+    out_video = rearrange(out_video, "b s (h d)" " -> b h s d",d=128).contiguous()
+    out_text = _ft_c_output_all_to_all(out_text)
+    out_video = _ft_c_output_all_to_all(out_video)
+    out_text = rearrange(out_text, "b h s d" " -> b s (h d)")
+    out_video = rearrange(out_video, "b h s d" " -> b s (h d)")
+
+    return out_video, out_text
 
 
 def replace_sparse_forward():

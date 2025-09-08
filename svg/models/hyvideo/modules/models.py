@@ -17,7 +17,12 @@ from .posemb_layers import apply_rotary_emb
 from .mlp_layers import MLP, MLPEmbedder, FinalLayer
 from .modulate_layers import ModulateDiT, modulate, apply_gate
 from .token_refiner import SingleTokenRefiner
+import torch.distributed as dist
 
+try:
+    from xfuser.core.distributed import get_ulysses_parallel_world_size, get_ulysses_parallel_rank, get_sp_group
+except:
+    pass
 
 class MMDoubleStreamBlock(nn.Module):
     """
@@ -681,7 +686,21 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         cu_seqlens_kv = cu_seqlens_q
         max_seqlen_q = img_seq_len + txt_seq_len
         max_seqlen_kv = max_seqlen_q
+        # NOTE: In Ulysses sequence parallelism, although sequences are distributed across ranks for processing,
+        # the attention computation operates on the full sequence dimension through all-to-all communication.
+        # Therefore, cu_seqlens and max_seqlen for flash attention must be calculated using the full sequence lengths
 
+        if dist.is_initialized() and get_ulysses_parallel_world_size() > 1:
+            # split both img and txt in sequence dim (temproal * height * width of the latents)
+            img = torch.chunk(img, get_ulysses_parallel_world_size(),dim=-2)[get_ulysses_parallel_rank()]
+            txt = torch.chunk(txt, get_ulysses_parallel_world_size(),dim=-2)[get_ulysses_parallel_rank()]
+            # freqs should be splited in sequence dim
+            freqs_cos = torch.chunk(freqs_cos, get_ulysses_parallel_world_size(),dim=-2)[get_ulysses_parallel_rank()]
+            freqs_sin = torch.chunk(freqs_sin, get_ulysses_parallel_world_size(),dim=-2)[get_ulysses_parallel_rank()]
+            # txt_seq_len in current rank should be divided
+            txt_seq_len = txt_seq_len // get_ulysses_parallel_world_size()
+            img_seq_len = img_seq_len // get_ulysses_parallel_world_size()
+        
         if hasattr(self, 'sparse_args'):
             if getattr(self.sparse_args, 'pattern', None) == "SVG":
                 freqs_cos = freqs_cos.to(x.device).to(torch.float32)
@@ -726,6 +745,11 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
 
         # ---------------------------- Final layer ------------------------------
         img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
+
+        if dist.is_initialized() and get_ulysses_parallel_world_size() > 1:
+            # gather img in sequence dim (temproal * height * width of the latents)
+            img = img.contiguous()
+            img = get_sp_group().all_gather(img, dim=-2)
 
         img = self.unpatchify(img, tt, th, tw)
         if return_dict:

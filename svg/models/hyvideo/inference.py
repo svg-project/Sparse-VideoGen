@@ -36,7 +36,19 @@ except:
     initialize_model_parallel = None
     init_distributed_environment = None
 
+"""
+    NOTE: This parallelization function is not used in the current implementation.
 
+    This function implements sequence parallelism by splitting the input tensor along either 
+    the height or width dimension. While this approach offers the advantage of parallelizing 
+    the patch embedding process, it introduces significant complexity when adapting the data 
+    layout for the SVG flex attention kernel.
+
+    Current approach: We implement parallelism directly in HYVideoDiffusionTransformer.forward() 
+    (located in svg/models/hyvideo/modules/models.py) by splitting along the flattened 
+    (temporal * height * width) dimension after patchify, which provides better compatibility 
+    with the attention mechanism and simpler implementation.
+"""
 def parallelize_transformer(pipe):
     transformer = pipe.transformer
     original_forward = transformer.forward
@@ -173,7 +185,9 @@ class Inference(object):
                 ring_degree=args.ring_degree,
                 ulysses_degree=args.ulysses_degree,
             )
-            device = torch.device(f"cuda:{os.environ['LOCAL_RANK']}")
+            local_rank = int(os.getenv("LOCAL_RANK", 0))
+            device = torch.device(f"cuda:{local_rank}")
+            torch.cuda.set_device(local_rank)
         else:
             if device is None:
                 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -405,8 +419,8 @@ class HunyuanVideoSampler(Inference):
         )
 
         self.default_negative_prompt = NEGATIVE_PROMPT
-        if self.parallel_args['ulysses_degree'] > 1 or self.parallel_args['ring_degree'] > 1:
-            parallelize_transformer(self.pipeline)
+        # if self.parallel_args['ulysses_degree'] > 1 or self.parallel_args['ring_degree'] > 1:
+        #     parallelize_transformer(self.pipeline)
 
     def load_diffusion_pipeline(
         self,
@@ -722,7 +736,9 @@ class HunyuanVideoSampler(Inference):
                       n_tokens: {n_tokens}
                     flow_shift: {flow_shift}
        embedded_guidance_scale: {embedded_guidance_scale}"""
-        logger.debug(debug_str)
+        if (not torch.distributed.is_initialized()) \
+            or get_sequence_parallel_rank() == 0:
+            logger.debug(debug_str)
 
         # ========================================================================
         # Pipeline inference
