@@ -1,12 +1,14 @@
 resolution="720p"
 infer_step=50
 
-first_times_fp=0.3
+first_times_fp=0.2
 first_layers_fp=0.03
 
-sparsity=0.25
+sparsity=0.3
 
-prompt=$(cat examples/1/prompt.txt)
+prompt_id=6
+
+prompt=$(cat examples/${prompt_id}/prompt.txt)
 
 output_dir="result/wan/t2v/svg"
 
@@ -34,4 +36,4 @@ python wan_t2v_inference.py \
     --sparsity $sparsity \
     --first_times_fp $first_times_fp \
     --first_layers_fp $first_layers_fp \
-    --output_file "${output_dir}/${output_feature}/0-0.mp4"
+    --output_file "${output_dir}/${output_feature}/${prompt_id}-0.mp4"

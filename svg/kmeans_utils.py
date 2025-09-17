@@ -1356,7 +1356,7 @@ def dynamic_block_sparse_fwd_flashinfer(
 
         # Prepare flashinfer wrapper
         float_workspace_buffer = torch.empty(128 * 1024 * 1024, device=q.device)
-        vector_sparse_indices_buffer = torch.empty(384 * 1024 * 1024, device=q.device)
+        vector_sparse_indices_buffer = torch.empty(1024 * 1024 * 1024, device=q.device)
         wrapper = flashinfer.sparse.VariableBlockSparseAttentionWrapper(float_workspace_buffer, backend="auto")
         wrapper.reset_workspace_buffer(
             float_workspace_buffer=wrapper._float_workspace_buffer,

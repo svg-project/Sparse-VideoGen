@@ -1,11 +1,13 @@
 resolution="480p"
 infer_step=40
 
-first_times_fp=0.3
+first_times_fp=0.2
 first_layers_fp=0.03
 
-prompt=$(cat examples/1/prompt.txt)
-image_path="examples/1/image.jpg"
+prompt_id=5
+
+prompt=$(cat examples/${prompt_id}/prompt.txt)
+image_path="examples/${prompt_id}/image.jpg"
 
 output_dir="result/wan/i2v/sap"
 
@@ -52,5 +54,5 @@ python wan_i2v_inference.py \
     --zero_step_kmeans_init \
     --first_times_fp $first_times_fp \
     --first_layers_fp $first_layers_fp \
-    --output_file "${output_dir}/${output_feature}/0-0.mp4" \
-    --logging_file "${output_dir}/${output_feature}/0-0.jsonl"
+    --output_file "${output_dir}/${output_feature}/${prompt_id}-0.mp4" \
+    --logging_file "${output_dir}/${output_feature}/${prompt_id}-0.jsonl"

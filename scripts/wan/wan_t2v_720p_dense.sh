@@ -1,9 +1,11 @@
 resolution="720p"
 infer_step=50
 
-prompt=$(cat examples/1/prompt.txt)
+prompt_id=6
 
-output_dir="result/cosmos/t2v/dense"
+prompt=$(cat examples/${prompt_id}/prompt.txt)
+
+output_dir="result/wan/t2v/dense"
 
 # Video Cfg
 video_cfg="Step_${infer_step}-Res_${resolution}"
@@ -18,4 +20,4 @@ python wan_t2v_inference.py \
     --seed 0 \
     --num_inference_steps $infer_step \
     --pattern "dense" \
-    --output_file "${output_dir}/${output_feature}/0-0.mp4"
+    --output_file "${output_dir}/${output_feature}/${prompt_id}-0.mp4"

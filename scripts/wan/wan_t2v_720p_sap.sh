@@ -1,16 +1,18 @@
 resolution="720p"
 infer_step=50
 
-first_times_fp=0.3
+first_times_fp=0.2
 first_layers_fp=0.03
 
-prompt=$(cat examples/1/prompt.txt)
-image_path="examples/1/image.jpg"
+prompt_id=5
+
+prompt=$(cat examples/${prompt_id}/prompt.txt)
+image_path="examples/${prompt_id}/image.jpg"
 
 # KMEANS_BLOCK Attention Example
 # Define K-means specific parameters
-qc_kmeans=100
-kc_kmeans=100
+qc_kmeans=200
+kc_kmeans=1000
 top_p_k=0.9
 min_kc_ratio=0.10
 kmeans_iter_init=50
@@ -52,5 +54,5 @@ python wan_t2v_inference.py \
     --kmeans_iter_step $kmeans_iter_step \
     --first_times_fp $first_times_fp \
     --first_layers_fp $first_layers_fp \
-    --output_file "${output_dir}/${output_feature}/0-0.mp4" \
-    --logging_file "${output_dir}/${output_feature}/0-0.jsonl"
+    --output_file "${output_dir}/${output_feature}/${prompt_id}-0.mp4" \
+    --logging_file "${output_dir}/${output_feature}/${prompt_id}-0.jsonl"

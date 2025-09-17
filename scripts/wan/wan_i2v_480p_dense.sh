@@ -1,8 +1,10 @@
 resolution="480p"
 infer_step=40
 
-prompt=$(cat examples/1/prompt.txt)
-image_path="examples/1/image.jpg"
+prompt_id=5
+
+prompt=$(cat examples/${prompt_id}/prompt.txt)
+image_path="examples/${prompt_id}/image.jpg"
 
 output_dir="result/wan/i2v/dense"
 
@@ -19,4 +21,4 @@ python wan_i2v_inference.py \
     --num_inference_steps $infer_step \
     --resolution $resolution \
     --pattern "dense" \
-    --output_file "${output_dir}/${output_feature}/0-0.mp4"
+    --output_file "${output_dir}/${output_feature}/${prompt_id}-0.mp4"
