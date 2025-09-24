@@ -6,7 +6,7 @@ first_layers_fp=0.03
 
 sparsity=0.3
 
-prompt_id=6
+prompt_id=3
 
 prompt=$(cat examples/${prompt_id}/prompt.txt)
 

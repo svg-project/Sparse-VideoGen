@@ -138,7 +138,7 @@ if __name__ == "__main__":
             args.num_frames, 
             first_layers_fp=args.first_layers_fp, 
             first_times_fp=args.first_times_fp,
-            attention_backend=args.attention_backend,
+            # attention_backend=args.attention_backend,
             pattern=args.pattern,
             # SVG specific
             num_sampled_rows=args.num_sampled_rows,
@@ -153,7 +153,7 @@ if __name__ == "__main__":
             args.num_frames,
             first_layers_fp=args.first_layers_fp,
             first_times_fp=args.first_times_fp,
-            attention_backend=args.attention_backend,
+            # attention_backend=args.attention_backend,
             pattern=args.pattern,
             # SAP specific
             num_q_centroids=args.num_q_centroids,
