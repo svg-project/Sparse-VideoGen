@@ -1,12 +1,10 @@
 resolution="480p"
 infer_step=50
 
-# Prompt Source
-PROMPT_SOURCE="T2V_Hyv_VBench"
-prompt_idx=102
-prompt="data/hyv_augmented_vbench.txt"
+prompt_id=7
+prompt=$(cat examples/${prompt_id}/prompt.txt)
 
-output_dir="result/hyvideo/t2v_${PROMPT_SOURCE}/dense"
+output_dir="result/hyvideo/t2v/dense"
 
 # Video Cfg
 video_cfg="Step_${infer_step}-Res_${resolution}"
@@ -18,10 +16,8 @@ python hyvideo_t2v_inference.py \
     --seed 0 \
     --height 480 \
     --width 720 \
-    --prompt_source "${PROMPT_SOURCE}" \
-    --prompt_idx "${prompt_idx}" \
     --prompt "${prompt}" \
     --num_inference_steps $infer_step \
     --resolution $resolution \
     --pattern "dense" \
-    --output_file "${output_dir}/${output_feature}/${prompt_idx}.mp4"
+    --output_file "${output_dir}/${output_feature}/${prompt_id}-0.mp4"

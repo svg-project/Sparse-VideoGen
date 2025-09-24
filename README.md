@@ -10,7 +10,7 @@ Accelerate Video Generation with High Pixel-level Fidelity
 </p>
 
 ## 🔥News🔥
-- [2025/09] Sparse VideoGen2 is open-sourced!
+- [2025/09] Sparse VideoGen2 is open-sourced! HunyuanVideo, Wan 2.1 and Cosmos can be accelerated by 2×
 - [2025/09] Sparse VideoGen2 is accepted by NeurIPS 2025 as a spotlight!
 - [2025/05] Sparse VideoGen is accepted by ICML 2025!
 - [2025/04] Wan 2.1 is supported! Both T2V and I2V are accelerated.
@@ -121,7 +121,7 @@ On a single H100, the generation should takes 4 minutes.
 ## 📑 Open-source Plan
  - [ ] Support FP8 attention
  - [x] Support [Wan 2.1](https://github.com/Wan-Video/Wan2.1)
- - [ ] Support [Cosmos](https://github.com/NVIDIA/Cosmos)
+ - [x] Support [Cosmos](https://github.com/NVIDIA/Cosmos)
 
 ## Efficiency Benchmark
 ### End-to-End Speedup

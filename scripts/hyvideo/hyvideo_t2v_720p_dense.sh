@@ -1,7 +1,9 @@
 resolution="720p"
 infer_step=50
 
-prompt="A cat walks on the grass, realistic"
+prompt_id=7
+prompt=$(cat examples/${prompt_id}/prompt.txt)
+
 output_dir="result/hyvideo/t2v/dense"
 
 # Video Cfg
@@ -11,9 +13,11 @@ output_feature="${video_cfg}"
 
 python hyvideo_t2v_inference.py \
     --model_id "tencent/HunyuanVideo" \
-    --prompt "${prompt}" \
     --seed 0 \
+    --height 720 \
+    --width 1280 \
+    --prompt "${prompt}" \
     --num_inference_steps $infer_step \
     --resolution $resolution \
     --pattern "dense" \
-    --output_file "${output_dir}/${output_feature}/0-0.mp4"
+    --output_file "${output_dir}/${output_feature}/${prompt_id}-0.mp4"
