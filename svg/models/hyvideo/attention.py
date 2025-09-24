@@ -495,10 +495,10 @@ class Hunyuan_SVGAttn_Processor2_0:
         if timestep[0] > self.first_times_fp:
             full_attention_flag = True
 
-        print(f"Full Attention Flag: {full_attention_flag}")
-        print(
-            f"Layer Index: {self.layer_idx}, First Layers FP: {self.first_layers_fp}, First Times FP: {self.first_times_fp}, Timestep: {timestep[0]}"
-        )
+        # print(f"Full Attention Flag: {full_attention_flag}")
+        # print(
+        #     f"Layer Index: {self.layer_idx}, First Layers FP: {self.first_layers_fp}, First Times FP: {self.first_times_fp}, Timestep: {timestep[0]}"
+        # )
 
         if full_attention_flag:
             output_hidden_states = self.flash_attention(query, key, value, cu_max_seqlens)
@@ -795,7 +795,7 @@ class Hunyuan_SAPAttn_Processor2_0(Hunyuan_SVGAttn_Processor2_0):
                     "density": densities.tolist(),
                 }
 
-                print(f"Time Step: {timestep[0].item()} Layer: {layer_idx} Density: {avg_density}")
+                # print(f"Time Step: {timestep[0].item()} Layer: {layer_idx} Density: {avg_density}")
 
                 # Append to log file
                 with open(self.logging_file, "a") as f:

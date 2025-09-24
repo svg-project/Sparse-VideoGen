@@ -551,7 +551,7 @@ class WanAttn_SAPAttn_Processor(WanAttn_SVGAttn_Processor2_0):
                         "density": densities.tolist(),
                     }
 
-                    print(f"Time Step: {timestep[0].item()} Layer: {self.layer_idx} Density: {avg_density}")
+                    # print(f"Time Step: {timestep[0].item()} Layer: {self.layer_idx} Density: {avg_density}")
 
                     with open(self.logging_file, "a") as f:
                         f.write(json.dumps(log_entry) + "\n")
