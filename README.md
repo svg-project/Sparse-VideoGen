@@ -63,46 +63,15 @@ pip install cuvs-cu12 --extra-index-url=https://pypi.nvidia.com #
 
 ## 🚀 Inference Examples
 ### Wan 2.1
-We support running Wan 2.1 inference using diffusers. Please make sure to install the latest version of diffusers.
-```bash
-pip install git+https://github.com/huggingface/diffusers
-```
 
 We support Text-to-Video and Image-to-Video inference of Wan 2.1 model. The running scripts are:
 ```bash
 # Text-to-Video
-bash scripts/wan_t2v_inference.sh
+bash scripts/wan/wan_t2v_720p_sap.sh
 
 # Image-to-Video
-bash scripts/wan_i2v_inference.sh
+bash scripts/wan/wan_i2v_720p_sap.sh
 ```
-
-Command Line:
-```python
-# Text-to-Video
-python wan_t2v_inference.py \
-    --prompt ${prompt} \
-    --height 720 \
-    --width 1280 \
-    --pattern "SVG" \
-    --num_sampled_rows 64 \
-    --sparsity 0.25 \
-    --first_times_fp 0.025 \
-    --first_layers_fp 0.075
-
-# Image-to-Video
-python wan_i2v_inference.py \
-    --prompt "$prompt" \
-    --image_path "$image_path" \
-    --seed 0 \
-    --num_inference_steps 40 \
-    --pattern "SVG" \
-    --num_sampled_rows 64 \
-    --sparsity 0.25 \
-    --first_times_fp 0.025 \
-    --first_layers_fp 0.075
-```
-If you want to run 480p video generation, please change the height and weight arguments to 480 and 832.
 
 ### HunyuanVideo
 To run HunyuanVideo Text-to-Video inference examples, you first need to download the checkpoints under `ckpts` following [the official guide](https://github.com/Tencent/HunyuanVideo/blob/main/ckpts/README.md).
