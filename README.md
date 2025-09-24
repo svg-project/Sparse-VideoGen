@@ -55,7 +55,6 @@ cd svg/kernels
 pip install -U cmake
 bash setup.sh
 cd 3rdparty/flashinfer
-git checkout 2f62643a8b73b5dd81dc8ca40f92e6e82dbf7c6a
 cp ../../../../assets/patches/modifications.patch ./
 git apply modifications.patch
 pip install --no-build-isolation --verbose --editable . # Block Sparse Attention with varied block sizes
