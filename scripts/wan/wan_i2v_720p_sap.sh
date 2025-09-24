@@ -1,10 +1,10 @@
 resolution="720p"
 infer_step=40
 
-first_times_fp=0.2
+first_times_fp=0.35
 first_layers_fp=0.03
 
-prompt_id=6
+prompt_id=4
 
 prompt=$(cat examples/${prompt_id}/prompt.txt)
 image_path="examples/${prompt_id}/image.jpg"

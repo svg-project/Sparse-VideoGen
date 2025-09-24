@@ -1,7 +1,9 @@
 resolution="720p"
 infer_step=35
 
-prompt=$(cat examples/2/prompt.txt)
+prompt_id=2
+
+prompt=$(cat examples/${prompt_id}/prompt.txt)
 
 output_dir="result/cosmos/t2v/dense"
 
@@ -18,4 +20,4 @@ python cosmos_t2v_inference.py \
     --seed 0 \
     --num_inference_steps $infer_step \
     --pattern "dense" \
-    --output_file "${output_dir}/${output_feature}/1-0.mp4"
+    --output_file "${output_dir}/${output_feature}/${prompt_id}-0.mp4"

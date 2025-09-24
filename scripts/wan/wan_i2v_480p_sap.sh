@@ -13,7 +13,7 @@ output_dir="result/wan/i2v/sap"
 
 # KMEANS_BLOCK Attention Example
 # Define K-means specific parameters
-qc_kmeans=500
+qc_kmeans=200
 kc_kmeans=1000
 top_p_k=0.9
 min_kc_ratio=0.10

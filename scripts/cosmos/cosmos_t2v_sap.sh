@@ -4,12 +4,14 @@ infer_step=35
 first_times_fp=0.3
 first_layers_fp=0.03
 
-prompt=$(cat examples/3/prompt.txt)
+prompt_id=2
+
+prompt=$(cat examples/${prompt_id}/prompt.txt)
 
 # KMEANS_BLOCK Attention Example
 # Define K-means specific parameters
-qc_kmeans=100
-kc_kmeans=100
+qc_kmeans=400
+kc_kmeans=1000
 top_p_k=0.9
 min_kc_ratio=0.10
 kmeans_iter_init=50
@@ -51,5 +53,5 @@ python cosmos_t2v_inference.py \
     --kmeans_iter_step $kmeans_iter_step \
     --first_times_fp $first_times_fp \
     --first_layers_fp $first_layers_fp \
-    --output_file "${output_dir}/${output_feature}/2-0.mp4" \
-    --logging_file "${output_dir}/${output_feature}/2-0.jsonl"
+    --output_file "${output_dir}/${output_feature}/${prompt_id}-0.mp4" \
+    --logging_file "${output_dir}/${output_feature}/${prompt_id}-0.jsonl"

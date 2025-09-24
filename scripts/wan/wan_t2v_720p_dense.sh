@@ -1,7 +1,7 @@
 resolution="720p"
 infer_step=50
 
-prompt_id=3
+prompt_id=1
 
 prompt=$(cat examples/${prompt_id}/prompt.txt)
 
