@@ -22,11 +22,30 @@ Sparse VideoGen (SVG) is a **training-free framework** that leverages **inherent
  - Proposing an **Online Profiling Strategy** to dynamically identify these patterns.
  - Implementing an end-to-end generation framework through **efficient algorithm-system co-design**, with **hardware-efficient layout transformation** and **customized kernels**.
 
-## 🎥 Demo
+## 🎥 Demo of SVG1
 <div style="display: flex; gap: 10px;">
     <img src="assets/video/SparseVideoGenDemo.gif" style="width: 100%;"/>
     <img src="assets/video/Algorithm.gif" style="width: 100%;"/>
 </div>
+
+## 🎥 Demo of SVG2
+<table border="0" style="width: 100%; text-align: center;">
+  <tr>
+    <td>
+      <video src="https://github.com/user-attachments/assets/ca4801bb-a94a-4f34-8c67-f63d080536b7"
+             width="100%" autoplay loop muted playsinline controls></video>
+    </td>
+    <td>
+      <video src="https://github.com/user-attachments/assets/a030f7f2-6048-4268-b984-ef5027c577d8"
+             width="100%" autoplay loop muted playsinline controls></video>
+    </td>
+    <td>
+      <video src="https://github.com/user-attachments/assets/acd186f3-828d-40af-a635-9abbe9fb7962"
+             width="100%" autoplay loop muted playsinline controls></video>
+    </td>
+  </tr>
+</table>
+
 
 
 ## 🛠️ Installation
