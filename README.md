@@ -6,13 +6,13 @@ Accelerate Video Generation with High Pixel-level Fidelity
 </h3>
 
 <p align="center">
-| <a href="https://svg-project.github.io/"><b>Blog</b></a> | <a href="https://arxiv.org/abs/2502.01776"><b>Paper</b></a> | <a href="https://x.com/HaochengXiUCB/status/1899953252327927911"><b>Twitter/X</b></a> |
+| <a href="https://svg-project.github.io/"><b>Website</b></a> | <a href="https://arxiv.org/abs/2502.01776"><b>SVG 1 Paper</b></a> | <a href="https://arxiv.org/abs/2502.01776"><b>SVG2 Paper</b></a> | <a href="https://x.com/HaochengXiUCB/status/1899953252327927911"><b>Twitter/X</b></a> |
 </p>
 
 ## 🔥News🔥
-- [2025/09] Sparse VideoGen2 is open-sourced! HunyuanVideo, Wan 2.1 and Cosmos can be accelerated by 2×
+- [2025/09] [Sparse VideoGen2](https://arxiv.org/abs/2505.18875) is open-sourced! HunyuanVideo, Wan 2.1 and Cosmos can be accelerated by 2×
 - [2025/09] Sparse VideoGen2 is accepted by NeurIPS 2025 as a spotlight!
-- [2025/05] Sparse VideoGen is accepted by ICML 2025!
+- [2025/05] [Sparse VideoGen](https://arxiv.org/abs/2502.01776) is accepted by ICML 2025!
 - [2025/04] Wan 2.1 is supported! Both T2V and I2V are accelerated.
 - [2025/03] Sparse VideoGen is open-sourced! HunyuanVideo and CogVideoX v1.5 can be accelerated by 2×
 
