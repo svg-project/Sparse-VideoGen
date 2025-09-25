@@ -67,54 +67,22 @@ pip install cuvs-cu12 --extra-index-url=https://pypi.nvidia.com #
 We support Text-to-Video and Image-to-Video inference of Wan 2.1 model. The running scripts are:
 ```bash
 # Text-to-Video
-bash scripts/wan/wan_t2v_720p_sap.sh
+# bash scripts/wan/wan_t2v_720p_svg.sh # SVG
+bash scripts/wan/wan_t2v_720p_sap.sh # SVG2
 
 # Image-to-Video
-bash scripts/wan/wan_i2v_720p_sap.sh
+# bash scripts/wan/wan_i2v_720p_svg.sh # SVG
+bash scripts/wan/wan_i2v_720p_sap.sh # SVG2
 ```
 
 ### HunyuanVideo
-To run HunyuanVideo Text-to-Video inference examples, you first need to download the checkpoints under `ckpts` following [the official guide](https://github.com/Tencent/HunyuanVideo/blob/main/ckpts/README.md).
-Then, run
+
+The running scripts are:
 ```bash
-bash scripts/hyvideo_inference.sh
+# bash scripts/hyvideo/hyvideo_t2v_720p_svg.sh # SVG
+bash scripts/hyvideo/hyvideo_t2v_720p_sap.sh # SVG2
 ```
 
-Command line:
-```python
-python3 hyvideo_inference.py \
-    --video-size 720 1280 \
-    --video-length 129 \
-    --infer-steps 50 \
-    --seed 0 \
-    --prompt "A cat walks on the grass, realistic style." \
-    --embedded-cfg-scale 6.0 \
-    --flow-shift 7.0 \
-    --flow-reverse \
-    --use-cpu-offload \
-    --output_path ./output.mp4 \
-    --pattern "SVG" \
-    --num_sampled_rows 64 \
-    --sparsity 0.2 \
-    --first_times_fp 0.055 \
-    --first_layers_fp 0.025
-```
-
-On a single H100, the generation should takes 14 minutes.
-
-### CogVideoX v1.5
-To run CogVideoX v1.5 Image-to-Video inference exmaples, run
-```bash
-bash scripts/cog_inference.sh
-```
-
-Command line:
-```python
-python3 cog_inference.py \
-    --prompt "A bright yellow water taxi glides smoothly across the choppy waters, creating gentle ripples in its wake. The iconic Brooklyn Bridge looms majestically in the background, its intricate web of cables and towering stone arches standing out against the city skyline. The boat, bustling with passengers, offers a lively contrast to the serene, expansive sky dotted with fluffy clouds. As it cruises forward, the vibrant cityscape of New York unfolds, with towering skyscrapers and historic buildings lining the waterfront, capturing the dynamic essence of urban life." \
-    --image_path "examples/cog/img/boat.jpg" \
-    --output_path "output.mp4"
-```
 
 On a single H100, the generation should takes 4 minutes.
 
@@ -124,8 +92,7 @@ On a single H100, the generation should takes 4 minutes.
  - [x] Support [Cosmos](https://github.com/NVIDIA/Cosmos)
 
 ## Efficiency Benchmark
-### End-to-End Speedup
-## End-to-End Speedup
+<!-- ### End-to-End Speedup
 
 | Model | Task | Hardware | Resolution | Baseline (min) | SVG (min) | Speedup |
 |-------|------|----------|------------|---------------|-----------|---------|
@@ -136,7 +103,7 @@ On a single H100, the generation should takes 4 minutes.
 | HunyuanVideo | Text-to-Video | A100 | 720P | 50:48 | 30:14 | 1.68× |
 | Wan 2.1 | Text-to-Video | A100 | 720P | 57:57 | 42:59 | 1.35× |
 | Wan 2.1 | Text-to-Video | A100 | 480P | 15:41 | 13:00 | 1.20× |
-| Wan 2.1 | Image-to-Video | A100 | 720P | 45:19 | 34:27 | 1.32× |
+| Wan 2.1 | Image-to-Video | A100 | 720P | 45:19 | 34:27 | 1.32× | -->
 
 
 ### Customized Kernels Performance
