@@ -4,7 +4,7 @@ infer_step=40
 first_times_fp=0.2
 first_layers_fp=0.03
 
-prompt_id=5
+prompt_id=1
 
 prompt=$(cat examples/${prompt_id}/prompt.txt)
 image_path="examples/${prompt_id}/image.jpg"

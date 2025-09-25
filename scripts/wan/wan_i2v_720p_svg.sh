@@ -7,7 +7,7 @@ attention_backend="flashinfer"
 
 sparsity=0.3
 
-prompt_id=4
+prompt_id=1
 
 prompt=$(cat examples/${prompt_id}/prompt.txt)
 image_path="examples/${prompt_id}/image.jpg"
