@@ -1,6 +1,110 @@
-*__pycache__/
-*.mp4
-build/
-ckpts/
-output.mp4
+
+# Custom Project Directories
+Wan2.1-T2V-14B*/
+Wan2.1-I2V-14B-720P*/
+Wan2.1-I2V-14B-480P*/
+debug_tensor*/
+assets/svg_tensors*
+ckpts
+llava-llama-3-8b-v1_1-transformers
+data/vbench_data
+debug.txt
+slurm/*
+
+# Custom Not Ignore files
+!data/*.txt
+
+ckpts*/
+output*.mp4
 result/
+
+
+# Python Cache and Compiled Files
+__pycache__/
+*.py[cod]
+*.so
+*.pyd
+*.pyo
+
+
+# Jupyter Notebooks Checkpoints
+.ipynb_checkpoints/
+
+
+# Build and Distribution
+build/
+dist/
+*.egg-info/
+*.egg/
+*.whl
+
+
+# IDEs and Editor Settings
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+
+# Logs and Debug Files
+*.log
+debug_tensor*/
+*.tmp
+*.temp
+
+
+# Media and Visualization Files
+*.png
+# *.jpg
+*.jpeg
+# *.gif
+*.bmp
+*.tiff
+*.ico
+*.svg
+*.webp
+assets/svg_tensors*
+
+
+# Model Files and Checkpoints
+*.pt
+*.ckpt
+*.bin
+ckpts*/
+*.h5
+*.onnx
+*.pb
+*.tflite
+
+
+# Output and Result Files
+*.mp4
+output*.mp4
+result/
+*.avi
+*.mov
+*.mkv
+*.webm
+
+
+# Data and JSON Files
+*.json
+*.jsonl
+*.csv
+*.tsv
+*.xls
+*.xlsx
+*.parquet
+*.feather
+*.nsys-rep
+
+
+# Documents
+*.pdf
+*.doc
+*.docx
+*.ppt
+*.pptx
+*.odt
+*.rtf
+

@@ -2,38 +2,56 @@ import torch
 import triton
 import triton.language as tl
 
+
 def token_reorder_to_token_major(tensor, fix_len, reorder_len, reorder_num_frame, frame_size):
     """Reorder it from frame major to token major!"""
     assert reorder_len == reorder_num_frame * frame_size
     assert tensor.shape[2] == fix_len + reorder_len
 
-    tensor[:, :, fix_len:, :] = tensor[:, :, fix_len:, :].reshape(tensor.shape[0], tensor.shape[1], reorder_num_frame, frame_size, tensor.shape[3]) \
-                                                         .transpose(2, 3).reshape(tensor.shape[0], tensor.shape[1], reorder_len, tensor.shape[3])
+    tensor[:, :, fix_len:, :] = (
+        tensor[:, :, fix_len:, :]
+        .reshape(tensor.shape[0], tensor.shape[1], reorder_num_frame, frame_size, tensor.shape[3])
+        .transpose(2, 3)
+        .reshape(tensor.shape[0], tensor.shape[1], reorder_len, tensor.shape[3])
+    )
     return tensor
+
 
 def token_reorder_to_frame_major(tensor, fix_len, reorder_len, reorder_num_frame, frame_size):
     """Reorder it from token major to frame major!"""
     assert reorder_len == reorder_num_frame * frame_size
     assert tensor.shape[2] == fix_len + reorder_len
 
-    tensor[:, :, fix_len:, :] = tensor[:, :, fix_len:, :].reshape(tensor.shape[0], tensor.shape[1], frame_size, reorder_num_frame, tensor.shape[3]) \
-                                                         .transpose(2, 3).reshape(tensor.shape[0], tensor.shape[1], reorder_len, tensor.shape[3])
+    tensor[:, :, fix_len:, :] = (
+        tensor[:, :, fix_len:, :]
+        .reshape(tensor.shape[0], tensor.shape[1], frame_size, reorder_num_frame, tensor.shape[3])
+        .transpose(2, 3)
+        .reshape(tensor.shape[0], tensor.shape[1], reorder_len, tensor.shape[3])
+    )
     return tensor
 
 
 @triton.jit
 def sparse_head_placement_kernel(
-    query_ptr, key_ptr, value_ptr, # [cfg, num_heads, seq_len, head_dim] seq_len = context_length + num_frame * frame_size
-    query_out_ptr, key_out_ptr, value_out_ptr, # [cfg, num_heads, seq_len, head_dim]
-    best_mask_idx_ptr, # [cfg, num_heads]
-    query_stride_b, query_stride_h, query_stride_s, query_stride_d,
-    mask_idx_stride_b, mask_idx_stride_h,
+    query_ptr,
+    key_ptr,
+    value_ptr,  # [cfg, num_heads, seq_len, head_dim] seq_len = context_length + num_frame * frame_size
+    query_out_ptr,
+    key_out_ptr,
+    value_out_ptr,  # [cfg, num_heads, seq_len, head_dim]
+    best_mask_idx_ptr,  # [cfg, num_heads]
+    query_stride_b,
+    query_stride_h,
+    query_stride_s,
+    query_stride_d,
+    mask_idx_stride_b,
+    mask_idx_stride_h,
     seq_len: tl.constexpr,
     head_dim: tl.constexpr,
-    context_length: tl.constexpr,   
-    num_frame: tl.constexpr,        
-    frame_size: tl.constexpr,      
-    BLOCK_SIZE: tl.constexpr
+    context_length: tl.constexpr,
+    num_frame: tl.constexpr,
+    frame_size: tl.constexpr,
+    BLOCK_SIZE: tl.constexpr,
 ):
     # Copy query, key, value to output
     # range: [b, h, block_id * block_size: block_id * block_size + block_size, :]
@@ -43,18 +61,18 @@ def sparse_head_placement_kernel(
 
     start_id = block_id * BLOCK_SIZE
     end_id = start_id + BLOCK_SIZE
-    end_id = tl.where(end_id > seq_len, seq_len, end_id) 
+    end_id = tl.where(end_id > seq_len, seq_len, end_id)
 
     # Load best mask idx (0 is spatial, 1 is temporal)
     is_temporal = tl.load(best_mask_idx_ptr + cfg * mask_idx_stride_b + head * mask_idx_stride_h)
-    
+
     offset_token = tl.arange(0, BLOCK_SIZE) + start_id
     offset_mask = offset_token < seq_len
     offset_d = tl.arange(0, head_dim)
 
     if is_temporal:
         # if offset_token < context_length:
-        #   offset_store_token = offset_token 
+        #   offset_store_token = offset_token
         # else:
         #   frame_id = (offset_token - context_length) // frame_size
         #   patch_id = (offset_token - context_length) - frame_id * frame_size
@@ -63,27 +81,26 @@ def sparse_head_placement_kernel(
         patch_id = (offset_token - context_length) - frame_id * frame_size
         offset_store_token = tl.where(offset_token < context_length, offset_token, context_length + patch_id * num_frame + frame_id)
 
-        offset_load = (cfg * query_stride_b + head * query_stride_h + offset_token[:,None] * query_stride_s) + offset_d[None,:] * query_stride_d
+        offset_load = (cfg * query_stride_b + head * query_stride_h + offset_token[:, None] * query_stride_s) + offset_d[None, :] * query_stride_d
         offset_query = query_ptr + offset_load
         offset_key = key_ptr + offset_load
         offset_value = value_ptr + offset_load
 
-        offset_store = (cfg * query_stride_b + head * query_stride_h + offset_store_token[:,None] * query_stride_s) + offset_d[None,:] * query_stride_d
+        offset_store = (cfg * query_stride_b + head * query_stride_h + offset_store_token[:, None] * query_stride_s) + offset_d[None, :] * query_stride_d
         offset_query_out = query_out_ptr + offset_store
         offset_key_out = key_out_ptr + offset_store
         offset_value_out = value_out_ptr + offset_store
 
         # Maybe tune the pipeline here
-        query = tl.load(offset_query, mask=offset_mask[:,None])
-        tl.store(offset_query_out, query, mask=offset_mask[:,None])
-        key = tl.load(offset_key, mask=offset_mask[:,None])
-        tl.store(offset_key_out, key, mask=offset_mask[:,None])
-        value = tl.load(offset_value, mask=offset_mask[:,None])
-        tl.store(offset_value_out, value, mask=offset_mask[:,None])
-
+        query = tl.load(offset_query, mask=offset_mask[:, None])
+        tl.store(offset_query_out, query, mask=offset_mask[:, None])
+        key = tl.load(offset_key, mask=offset_mask[:, None])
+        tl.store(offset_key_out, key, mask=offset_mask[:, None])
+        value = tl.load(offset_value, mask=offset_mask[:, None])
+        tl.store(offset_value_out, value, mask=offset_mask[:, None])
 
     else:
-        offset_load = (cfg * query_stride_b + head * query_stride_h + offset_token[:,None] * query_stride_s) + offset_d[None,:] * query_stride_d
+        offset_load = (cfg * query_stride_b + head * query_stride_h + offset_token[:, None] * query_stride_s) + offset_d[None, :] * query_stride_d
         offset_query = query_ptr + offset_load
         offset_key = key_ptr + offset_load
         offset_value = value_ptr + offset_load
@@ -94,12 +111,12 @@ def sparse_head_placement_kernel(
         offset_value_out = value_out_ptr + offset_store
 
         # Maybe tune the pipeline here
-        query = tl.load(offset_query, mask=offset_mask[:,None])
-        tl.store(offset_query_out, query, mask=offset_mask[:,None])
-        key = tl.load(offset_key, mask=offset_mask[:,None])
-        tl.store(offset_key_out, key, mask=offset_mask[:,None])
-        value = tl.load(offset_value, mask=offset_mask[:,None])
-        tl.store(offset_value_out, value, mask=offset_mask[:,None])
+        query = tl.load(offset_query, mask=offset_mask[:, None])
+        tl.store(offset_query_out, query, mask=offset_mask[:, None])
+        key = tl.load(offset_key, mask=offset_mask[:, None])
+        tl.store(offset_key_out, key, mask=offset_mask[:, None])
+        value = tl.load(offset_value, mask=offset_mask[:, None])
+        tl.store(offset_value_out, value, mask=offset_mask[:, None])
 
 
 def sparse_head_placement(query, key, value, query_out, key_out, value_out, best_mask_idx, context_length, num_frame, frame_size):
@@ -110,13 +127,25 @@ def sparse_head_placement(query, key, value, query_out, key_out, value_out, best
     grid = (cfg, num_heads, (seq_len + BLOCK_SIZE - 1) // BLOCK_SIZE)
 
     sparse_head_placement_kernel[grid](
-        query, key, value, 
-        query_out, key_out, value_out, 
+        query,
+        key,
+        value,
+        query_out,
+        key_out,
+        value_out,
         best_mask_idx,
-        query.stride(0), query.stride(1), query.stride(2), query.stride(3),
-        best_mask_idx.stride(0), best_mask_idx.stride(1),
-        seq_len, head_dim, context_length, num_frame, frame_size, 
-        BLOCK_SIZE
+        query.stride(0),
+        query.stride(1),
+        query.stride(2),
+        query.stride(3),
+        best_mask_idx.stride(0),
+        best_mask_idx.stride(1),
+        seq_len,
+        head_dim,
+        context_length,
+        num_frame,
+        frame_size,
+        BLOCK_SIZE,
     )
 
 
@@ -129,14 +158,14 @@ def ref_sparse_head_placement(query, key, value, best_mask_idx, context_length, 
     value_out = value.clone()
 
     # Spatial
-    query_out[best_mask_idx == 0], key_out[best_mask_idx == 0], value_out[best_mask_idx == 0] = \
-        query[best_mask_idx == 0], key[best_mask_idx == 0], value[best_mask_idx == 0]
+    query_out[best_mask_idx == 0], key_out[best_mask_idx == 0], value_out[best_mask_idx == 0] = query[best_mask_idx == 0], key[best_mask_idx == 0], value[best_mask_idx == 0]
 
     # Temporal
-    query_out[best_mask_idx == 1], key_out[best_mask_idx == 1], value_out[best_mask_idx == 1] = \
-            token_reorder_to_token_major(query[best_mask_idx == 1].unsqueeze(0), context_length, num_frame * frame_size, num_frame, frame_size).squeeze(0), \
-            token_reorder_to_token_major(key[best_mask_idx == 1].unsqueeze(0), context_length, num_frame * frame_size, num_frame, frame_size).squeeze(0), \
-            token_reorder_to_token_major(value[best_mask_idx == 1].unsqueeze(0), context_length, num_frame * frame_size, num_frame, frame_size).squeeze(0)
+    query_out[best_mask_idx == 1], key_out[best_mask_idx == 1], value_out[best_mask_idx == 1] = (
+        token_reorder_to_token_major(query[best_mask_idx == 1].unsqueeze(0), context_length, num_frame * frame_size, num_frame, frame_size).squeeze(0),
+        token_reorder_to_token_major(key[best_mask_idx == 1].unsqueeze(0), context_length, num_frame * frame_size, num_frame, frame_size).squeeze(0),
+        token_reorder_to_token_major(value[best_mask_idx == 1].unsqueeze(0), context_length, num_frame * frame_size, num_frame, frame_size).squeeze(0),
+    )
 
     return query_out, key_out, value_out
 
@@ -229,17 +258,21 @@ def benchmark_sparse_head_placement():
 
 @triton.jit
 def hidden_states_placement_kernel(
-    hidden_states_ptr, # [cfg, num_heads, seq_len, head_dim] seq_len = context_length + num_frame * frame_size
-    hidden_states_out_ptr, # [cfg, num_heads, seq_len, head_dim]
-    best_mask_idx_ptr, # [cfg, num_heads]
-    hidden_states_stride_b, hidden_states_stride_h, hidden_states_stride_s, hidden_states_stride_d,
-    mask_idx_stride_b, mask_idx_stride_h,
+    hidden_states_ptr,  # [cfg, num_heads, seq_len, head_dim] seq_len = context_length + num_frame * frame_size
+    hidden_states_out_ptr,  # [cfg, num_heads, seq_len, head_dim]
+    best_mask_idx_ptr,  # [cfg, num_heads]
+    hidden_states_stride_b,
+    hidden_states_stride_h,
+    hidden_states_stride_s,
+    hidden_states_stride_d,
+    mask_idx_stride_b,
+    mask_idx_stride_h,
     seq_len: tl.constexpr,
     head_dim: tl.constexpr,
-    context_length: tl.constexpr,   
-    num_frame: tl.constexpr,        
-    frame_size: tl.constexpr,      
-    BLOCK_SIZE: tl.constexpr
+    context_length: tl.constexpr,
+    num_frame: tl.constexpr,
+    frame_size: tl.constexpr,
+    BLOCK_SIZE: tl.constexpr,
 ):
     # Copy hidden_states to output
     # range: [b, h, block_id * block_size: block_id * block_size + block_size, :]
@@ -249,18 +282,18 @@ def hidden_states_placement_kernel(
 
     start_id = block_id * BLOCK_SIZE
     end_id = start_id + BLOCK_SIZE
-    end_id = tl.where(end_id > seq_len, seq_len, end_id) 
+    end_id = tl.where(end_id > seq_len, seq_len, end_id)
 
     # Load best mask idx (0 is spatial, 1 is temporal)
     is_temporal = tl.load(best_mask_idx_ptr + cfg * mask_idx_stride_b + head * mask_idx_stride_h)
-    
+
     offset_token = tl.arange(0, BLOCK_SIZE) + start_id
     offset_mask = offset_token < seq_len
     offset_d = tl.arange(0, head_dim)
 
     if is_temporal:
         # if offset_token < context_length:
-        #   offset_store_token = offset_token 
+        #   offset_store_token = offset_token
         # else:
         #   patch_id = (offset_token - context_length) // num_frame
         #   frame_id = (offset_token - context_length) - patch_id * num_frame
@@ -269,25 +302,25 @@ def hidden_states_placement_kernel(
         frame_id = (offset_token - context_length) - patch_id * num_frame
         offset_store_token = tl.where(offset_token < context_length, offset_token, context_length + frame_id * frame_size + patch_id)
 
-        offset_load = (cfg * hidden_states_stride_b + head * hidden_states_stride_h + offset_token[:,None] * hidden_states_stride_s) + offset_d[None,:] * hidden_states_stride_d
+        offset_load = (cfg * hidden_states_stride_b + head * hidden_states_stride_h + offset_token[:, None] * hidden_states_stride_s) + offset_d[None, :] * hidden_states_stride_d
         offset_hidden_states = hidden_states_ptr + offset_load
 
-        offset_store = (cfg * hidden_states_stride_b + head * hidden_states_stride_h + offset_store_token[:,None] * hidden_states_stride_s) + offset_d[None,:] * hidden_states_stride_d
+        offset_store = (cfg * hidden_states_stride_b + head * hidden_states_stride_h + offset_store_token[:, None] * hidden_states_stride_s) + offset_d[None, :] * hidden_states_stride_d
         offset_hidden_states_out = hidden_states_out_ptr + offset_store
 
         # Maybe tune the pipeline here
-        hidden_states = tl.load(offset_hidden_states, mask=offset_mask[:,None])
-        tl.store(offset_hidden_states_out, hidden_states, mask=offset_mask[:,None])
+        hidden_states = tl.load(offset_hidden_states, mask=offset_mask[:, None])
+        tl.store(offset_hidden_states_out, hidden_states, mask=offset_mask[:, None])
     else:
-        offset_load = (cfg * hidden_states_stride_b + head * hidden_states_stride_h + offset_token[:,None] * hidden_states_stride_s) + offset_d[None,:] * hidden_states_stride_d
+        offset_load = (cfg * hidden_states_stride_b + head * hidden_states_stride_h + offset_token[:, None] * hidden_states_stride_s) + offset_d[None, :] * hidden_states_stride_d
         offset_hidden_states = hidden_states_ptr + offset_load
 
         offset_store = offset_load
         offset_hidden_states_out = hidden_states_out_ptr + offset_store
 
         # Maybe tune the pipeline here
-        hidden_states = tl.load(offset_hidden_states, mask=offset_mask[:,None])
-        tl.store(offset_hidden_states_out, hidden_states, mask=offset_mask[:,None])
+        hidden_states = tl.load(offset_hidden_states, mask=offset_mask[:, None])
+        tl.store(offset_hidden_states_out, hidden_states, mask=offset_mask[:, None])
 
 
 def hidden_states_placement(hidden_states, hidden_states_out, best_mask_idx, context_length, num_frame, frame_size):
@@ -297,18 +330,26 @@ def hidden_states_placement(hidden_states, hidden_states_out, best_mask_idx, con
 
     grid = (cfg, num_heads, (seq_len + BLOCK_SIZE - 1) // BLOCK_SIZE)
 
-
     hidden_states_placement_kernel[grid](
-        hidden_states, 
-        hidden_states_out, 
+        hidden_states,
+        hidden_states_out,
         best_mask_idx,
-        hidden_states.stride(0), hidden_states.stride(1), hidden_states.stride(2), hidden_states.stride(3),
-        best_mask_idx.stride(0), best_mask_idx.stride(1),
-        seq_len, head_dim, context_length, num_frame, frame_size, 
-        BLOCK_SIZE
+        hidden_states.stride(0),
+        hidden_states.stride(1),
+        hidden_states.stride(2),
+        hidden_states.stride(3),
+        best_mask_idx.stride(0),
+        best_mask_idx.stride(1),
+        seq_len,
+        head_dim,
+        context_length,
+        num_frame,
+        frame_size,
+        BLOCK_SIZE,
     )
 
     return hidden_states_out
+
 
 def ref_hidden_states_placement(hidden_states, output_hidden_states, best_mask_idx, context_length, num_frame, frame_size):
     cfg, num_heads, seq_len, head_dim = hidden_states.shape
@@ -318,6 +359,7 @@ def ref_hidden_states_placement(hidden_states, output_hidden_states, best_mask_i
     output_hidden_states[best_mask_idx == 0] = hidden_states[best_mask_idx == 0]
     # Temporal
     output_hidden_states[best_mask_idx == 1] = token_reorder_to_frame_major(hidden_states[best_mask_idx == 1].unsqueeze(0), context_length, num_frame * frame_size, num_frame, frame_size).squeeze(0)
+
 
 def test_hidden_states_placement():
 
@@ -344,6 +386,7 @@ def test_hidden_states_placement():
     ref_hidden_states_placement(hidden_states, hidden_states_out2, best_mask_idx, context_length, num_frame, frame_size)
 
     torch.testing.assert_close(hidden_states_out1, hidden_states_out2)
+
 
 def benchmark_hidden_states_placement():
     import time

@@ -10,6 +10,8 @@ Accelerate Video Generation with High Pixel-level Fidelity
 </p>
 
 ## 🔥News🔥
+- [2025/09] Sparse VideoGen2 is open-sourced! HunyuanVideo, Wan 2.1 and Cosmos can be accelerated by 2×
+- [2025/09] Sparse VideoGen2 is accepted by NeurIPS 2025 as a spotlight!
 - [2025/05] Sparse VideoGen is accepted by ICML 2025!
 - [2025/04] Wan 2.1 is supported! Both T2V and I2V are accelerated.
 - [2025/03] Sparse VideoGen is open-sourced! HunyuanVideo and CogVideoX v1.5 can be accelerated by 2×
@@ -37,64 +39,39 @@ cd Sparse-VideoGen
 We recommend using CUDA versions 12.4 / 12.8 + PyTorch versions 2.5.1 / 2.6.0
 ```bash
 # 1. Create and activate conda environment
-conda create -n SVG python==3.10.9
+conda create -n SVG python==3.12.9 # or 3.11.9 if have error when installing kernels
 conda activate SVG
 
-# 2. Install PyTorch
-pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124
+# 2. Install uv, then install other packages
+pip install uv
+uv pip install -e .
 
-# 3. Install pip dependencies from CogVideoX and HunyuanVideo
-pip install -r requirements.txt
 pip install flash-attn --no-build-isolation
 
-# 4. (Optional) Install customized kernels for maximized speedup. (You might need to upgrade your cmake and CUDA version.)
+# 4. Install customized kernels. (You might need to upgrade your cmake and CUDA version.)
+pip install -U setuptools # Require at least version 77.0.0
 git submodule update --init --recursive
 cd svg/kernels
+pip install -U cmake
 bash setup.sh
+cd 3rdparty/flashinfer
+cp ../../../../assets/patches/modifications.patch ./
+git apply modifications.patch
+pip install --no-build-isolation --verbose --editable . # Block Sparse Attention with varied block sizes
+pip install cuvs-cu12 --extra-index-url=https://pypi.nvidia.com # 
 ```
 
 ## 🚀 Inference Examples
 ### Wan 2.1
-We support running Wan 2.1 inference using diffusers. Please make sure to install the latest version of diffusers.
-```bash
-pip install git+https://github.com/huggingface/diffusers
-```
 
 We support Text-to-Video and Image-to-Video inference of Wan 2.1 model. The running scripts are:
 ```bash
 # Text-to-Video
-bash scripts/wan_t2v_inference.sh
+bash scripts/wan/wan_t2v_720p_sap.sh
 
 # Image-to-Video
-bash scripts/wan_i2v_inference.sh
+bash scripts/wan/wan_i2v_720p_sap.sh
 ```
-
-Command Line:
-```python
-# Text-to-Video
-python wan_t2v_inference.py \
-    --prompt ${prompt} \
-    --height 720 \
-    --width 1280 \
-    --pattern "SVG" \
-    --num_sampled_rows 64 \
-    --sparsity 0.25 \
-    --first_times_fp 0.025 \
-    --first_layers_fp 0.075
-
-# Image-to-Video
-python wan_i2v_inference.py \
-    --prompt "$prompt" \
-    --image_path "$image_path" \
-    --seed 0 \
-    --num_inference_steps 40 \
-    --pattern "SVG" \
-    --num_sampled_rows 64 \
-    --sparsity 0.25 \
-    --first_times_fp 0.025 \
-    --first_layers_fp 0.075
-```
-If you want to run 480p video generation, please change the height and weight arguments to 480 and 832.
 
 ### HunyuanVideo
 To run HunyuanVideo Text-to-Video inference examples, you first need to download the checkpoints under `ckpts` following [the official guide](https://github.com/Tencent/HunyuanVideo/blob/main/ckpts/README.md).
@@ -144,7 +121,59 @@ On a single H100, the generation should takes 4 minutes.
 ## 📑 Open-source Plan
  - [ ] Support FP8 attention
  - [x] Support [Wan 2.1](https://github.com/Wan-Video/Wan2.1)
- - [ ] Support [Cosmos](https://github.com/NVIDIA/Cosmos)
+ - [x] Support [Cosmos](https://github.com/NVIDIA/Cosmos)
+
+## Efficiency Benchmark
+### End-to-End Speedup
+## End-to-End Speedup
+
+| Model | Task | Hardware | Resolution | Baseline (min) | SVG (min) | Speedup |
+|-------|------|----------|------------|---------------|-----------|---------|
+| HunyuanVideo | Text-to-Video | H100 | 720P | 29:57 | 15:38 | 1.91× |
+| Wan 2.1 | Text-to-Video | H100 | 720P | 31:35 | 20:51 | 1.51× |
+| Wan 2.1 | Text-to-Video | H100 | 480P | 8:05 | 6:11 | 1.32×  |
+| Wan 2.1 | Image-to-Video | H100 | 720P | 24:05 | 16:03 | 1.50× |
+| HunyuanVideo | Text-to-Video | A100 | 720P | 50:48 | 30:14 | 1.68× |
+| Wan 2.1 | Text-to-Video | A100 | 720P | 57:57 | 42:59 | 1.35× |
+| Wan 2.1 | Text-to-Video | A100 | 480P | 15:41 | 13:00 | 1.20× |
+| Wan 2.1 | Image-to-Video | A100 | 720P | 45:19 | 34:27 | 1.32× |
+
+
+### Customized Kernels Performance
+We evaluate the performance of our customized kernels against the baseline implementations. The following tables show the memory bandwidth (GB/s) comparison for different batch sizes and hidden dimensions:
+
+#### RMSNorm Performance
+
+| Batch Size | Hidden Dim | Diffusers (GB/s) | SVG Customized (GB/s) | Speedup |
+|------------|------------|------------------|----------------------|----------|
+| 2,097,152  | 32        | 151.36           | 809.69              | 5.35×    |
+| 1,048,576  | 64        | 196.54           | 810.61              | 4.12×    |
+| 524,288    | 128       | 232.66           | 810.21              | 3.48×    |
+| 262,144    | 256       | 252.67           | 810.41              | 3.21×    |
+
+#### LayerNorm Performance
+
+| Batch Size | Hidden Dim | Diffusers (GB/s) | SVG Customized (GB/s) | Speedup |
+|------------|------------|------------------|----------------------|----------|
+| 2,097,152  | 32        | 45.82            | 808.28              | 17.64×   |
+| 1,048,576  | 64        | 91.18            | 805.22              | 8.83×    |
+| 524,288    | 128       | 197.89           | 804.29              | 4.06×    |
+| 262,144    | 256       | 350.87           | 804.43              | 2.29×    |
+
+Our customized kernels achieve significantly higher memory bandwidth across all configurations, with speedups ranging from 2.29× to 17.64×. The performance improvement is particularly notable for smaller hidden dimensions and larger batch sizes.
+
+### RoPE (Rotary Position Embedding) Performance
+
+| Batch Size | Num Heads | Seq Length | Head Dim | Diffusers (GB/s) | SVG Customized (GB/s) | Speedup |
+|------------|-----------|------------|----------|------------------|----------------------|----------|
+| 1          | 32        | 1024       | 64      | 17.25           | 158.81              | 9.21×    |
+| 1          | 32        | 4096       | 64      | 27.74           | 405.75              | 14.63×   |
+| 1          | 32        | 16384      | 64      | 30.86           | 605.89              | 19.63×   |
+| 4          | 32        | 1024       | 64      | 27.60           | 475.94              | 17.24×   |
+| 4          | 32        | 4096       | 64      | 30.93           | 614.11              | 19.85×   |
+| 4          | 32        | 16384      | 64      | 32.41           | 648.36              | 20.00×   |
+
+The RoPE implementation in SVG shows substantial performance improvements over the Diffusers baseline, with speedups ranging from 9.21× to 20.00×. The performance gain is particularly significant for longer sequence lengths and larger batch sizes, demonstrating excellent scaling characteristics.
 
 ## 🔗 BibTeX
 If you find Sparse VideoGen useful for your research and applications or interesting, please cite our work using BibTeX:

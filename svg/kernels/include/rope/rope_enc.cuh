@@ -14,17 +14,20 @@ using namespace flashinfer;
 
 template <uint32_t vec_size, uint32_t bdx, typename T>
 __device__ __forceinline__ vec_t<float, vec_size>
-vec_apply_llama_rope_cos_sin_interleave(const T* x,
-										const vec_t<float, vec_size>& cos,
-										const vec_t<float, vec_size>& sin,
-										const uint32_t rotary_dim = vec_size * bdx) {
+vec_apply_llama_rope_cos_sin_interleave(const T *x,
+										const vec_t<float, vec_size> &cos,
+										const vec_t<float, vec_size> &sin,
+										const uint32_t rotary_dim = vec_size * bdx)
+{
 	vec_t<float, vec_size> vec, vec_before;
 	vec.cast_load(x + threadIdx.x * vec_size);
 
-	if(threadIdx.x * vec_size < rotary_dim) {
+	if (threadIdx.x * vec_size < rotary_dim)
+	{
 		vec_before = vec;
 #pragma unroll
-		for(uint32_t i = 0; i < vec_size; ++i) {
+		for (uint32_t i = 0; i < vec_size; ++i)
+		{
 			vec[i] =
 				vec[i] * cos[i] + ((i % 2 == 0) ? -vec_before[i ^ 1] : vec_before[i ^ 1]) * sin[i];
 		}
@@ -33,31 +36,32 @@ vec_apply_llama_rope_cos_sin_interleave(const T* x,
 }
 
 /*
-    * ApplyQKRotaryCosSinCacheInPlaceKernel
-    * Apply QKRotary with cosine and sine cache in place. 
-    * Single batch, Contigous memory layout, row-major.
-    * @tparam head_dim: the dimension of the head
-    * @tparam vec_size: the size of the vector
-    * @tparam bdx: num of threads needed for loading a head
-    * @tparam DType: the data type
-    * 
-    * @param q: [bsz, num_qo_heads, seq_len, head_dim]
-    * @param k: [bsz, num_kv_heads, seq_len, head_dim]
-    * @param cos_cache: [seq_len, head_dim]
-    * @param sin_cache: [seq_len, head_dim]
-    * kernel launched in: 
-    *   gridDim(bsz, seq_len+bdy-1/bdy)
-    *   blockDim(bdx, bdy)
-    */
+ * ApplyQKRotaryCosSinCacheInPlaceKernel
+ * Apply QKRotary with cosine and sine cache in place.
+ * Single batch, Contigous memory layout, row-major.
+ * @tparam head_dim: the dimension of the head
+ * @tparam vec_size: the size of the vector
+ * @tparam bdx: num of threads needed for loading a head
+ * @tparam DType: the data type
+ *
+ * @param q: [bsz, num_qo_heads, seq_len, head_dim]
+ * @param k: [bsz, num_kv_heads, seq_len, head_dim]
+ * @param cos_cache: [seq_len, head_dim]
+ * @param sin_cache: [seq_len, head_dim]
+ * kernel launched in:
+ *   gridDim(bsz, seq_len+bdy-1/bdy)
+ *   blockDim(bdx, bdy)
+ */
 template <uint32_t head_dim, uint32_t vec_size, uint32_t bdx, typename DType>
-__global__ void ApplyQKRotaryCosSinCacheInPlaceKernel(DType* q,
-													  DType* k,
-													  float* __restrict__ cos_cache,
-													  float* __restrict__ sin_cache,
+__global__ void ApplyQKRotaryCosSinCacheInPlaceKernel(DType *q,
+													  DType *k,
+													  float *__restrict__ cos_cache,
+													  float *__restrict__ sin_cache,
 													  uint32_t stride_seq_len,
 													  uint32_t skip_seq_len,
 													  uint32_t num_qo_heads,
-													  uint32_t num_kv_heads) {
+													  uint32_t num_kv_heads)
+{
 	const uint32_t bx = blockIdx.x, by = blockIdx.y;
 	const uint32_t tx = threadIdx.x, ty = threadIdx.y;
 	const uint32_t bdy = blockDim.y;
@@ -66,13 +70,15 @@ __global__ void ApplyQKRotaryCosSinCacheInPlaceKernel(DType* q,
 	const uint32_t cur_seq_len = by * bdy + ty;
 
 	vec_t<float, vec_size> cos, sin;
-	if(cur_seq_len < valid_seq_len) {
+	if (cur_seq_len < valid_seq_len)
+	{
 		cos.load(cos_cache + cur_seq_len * head_dim + tx * vec_size);
 		sin.load(sin_cache + cur_seq_len * head_dim + tx * vec_size);
 
 #pragma unroll 1
-		for(uint32_t qo_head_idx = 0; qo_head_idx < num_qo_heads; ++qo_head_idx) {
-			DType* q_ptr =
+		for (uint32_t qo_head_idx = 0; qo_head_idx < num_qo_heads; ++qo_head_idx)
+		{
+			DType *q_ptr =
 				q + (bx * num_qo_heads + qo_head_idx) * stride_seq_len * head_dim + (cur_seq_len + skip_seq_len) * head_dim;
 			vec_t<float, vec_size> q_vec;
 			q_vec =
@@ -81,8 +87,9 @@ __global__ void ApplyQKRotaryCosSinCacheInPlaceKernel(DType* q,
 		}
 
 #pragma unroll 1
-		for(uint32_t kv_head_idx = 0; kv_head_idx < num_kv_heads; ++kv_head_idx) {
-			DType* k_ptr =
+		for (uint32_t kv_head_idx = 0; kv_head_idx < num_kv_heads; ++kv_head_idx)
+		{
+			DType *k_ptr =
 				k + (bx * num_kv_heads + kv_head_idx) * stride_seq_len * head_dim + (cur_seq_len + skip_seq_len) * head_dim;
 			vec_t<float, vec_size> k_vec;
 			k_vec =
@@ -93,17 +100,18 @@ __global__ void ApplyQKRotaryCosSinCacheInPlaceKernel(DType* q,
 }
 
 template <typename DType>
-void ApplyQKRotaryCosSinCacheInPlace(DType* q,
-									 DType* k,
-									 float* cos_cache,
-									 float* sin_cache,
+void ApplyQKRotaryCosSinCacheInPlace(DType *q,
+									 DType *k,
+									 float *cos_cache,
+									 float *sin_cache,
 									 uint32_t bsz,
 									 uint32_t num_qo_heads,
 									 uint32_t num_kv_heads,
 									 uint32_t stride_seq_len,
 									 uint32_t skip_seq_len,
 									 uint32_t head_dim,
-									 cudaStream_t stream) {
+									 cudaStream_t stream)
+{
 	DISPATCH_HEAD_DIM(head_dim, HEAD_DIM, {
 		constexpr uint32_t vec_size = std::max(16 / sizeof(DType), HEAD_DIM / 32);
 		constexpr uint32_t bdx = HEAD_DIM / vec_size;

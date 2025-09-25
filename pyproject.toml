@@ -1,0 +1,95 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sparse-videogen"
+version = "0.1.0"
+description = "Sparse Video Generation Models"
+readme = "svg/README.md"
+requires-python = ">=3.8"
+license = "MIT"
+authors = [{ name = "FirstIntelligence" }]
+dependencies = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "numpy>=1.21.0",
+    "scipy>=1.7.0",
+    "scikit-learn>=1.0.0",
+    "pillow>=9.0.0",
+    "tqdm>=4.65.0",
+    "matplotlib>=3.5.0",
+    "einops>=0.6.0",
+    "diffusers==0.34.0",
+    "transformers>=4.49.2",
+    "accelerate>=1.7.0",
+    "ftfy",
+    "imageio",
+    "imageio-ffmpeg",
+    "pytest",
+    "IPython",
+    "termcolor",
+    "tabulate",
+    "lpips",
+    "scikit-image",
+    "loguru",
+    "pandas",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=22.0.0",
+    "isort>=5.10.0",
+    "flake8>=4.0.0",
+    "mypy>=0.900",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["svg*"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["svg"]
+
+[tool.black]
+line-length = 120
+target-version = ['py310']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+exclude = [".git", ".mypy_cache", ".tox", ".venv", "build", "dist"]
+src = ["svg"]
+
+[tool.ruff.lint]
+extend-select = ["I", "E", "F"]
+extend-ignore = ["E203", "E731", "D203", "D212", "E501", "F841"]
+
+
+[tool.hatch.envs.lint]
+dev-mode = false
+dependencies = ["black", "ruff"]
+
+[tool.hatch.envs.lint.scripts]
+check = [
+    "ruff check analyze svg/models/hyvideo svg/models/wan svg/utils svg/*.py",
+    "black --check analyze svg/models/hyvideo svg/models/wan svg/utils svg/*.py",
+]
+fix = [
+    "ruff check analyze svg/models/hyvideo svg/models/wan svg/utils svg/*.py --fix",
+    "black analyze svg/models/hyvideo svg/models/wan svg/utils svg/*.py",
+]

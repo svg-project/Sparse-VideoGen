@@ -6,5 +6,5 @@ fi
 mkdir -p build
 cd build
 
-cmake -DCMAKE_PREFIX_PATH=`python -c 'import torch;print(torch.utils.cmake_prefix_path)'` ..
+cmake -DCMAKE_PREFIX_PATH=`python -c 'import torch;print(torch.utils.cmake_prefix_path)'` -DUSE_SYSTEM_NVTX:BOOL=ON ..
 make -j
