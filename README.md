@@ -84,8 +84,6 @@ bash scripts/hyvideo/hyvideo_t2v_720p_sap.sh # SVG2
 ```
 
 
-On a single H100, the generation should takes 4 minutes.
-
 ## 📑 Open-source Plan
  - [ ] Support FP8 attention
  - [x] Support [Wan 2.1](https://github.com/Wan-Video/Wan2.1)
