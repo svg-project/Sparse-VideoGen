@@ -10,6 +10,7 @@ Accelerate Video Generation with High Pixel-level Fidelity
 </p>
 
 ## 🔥News🔥
+- [2025/09] We release [Flash k-Means](https://github.com/svg-project/flash-kmeans), a batched K-Means clustering algorithm implemented with Triton that offers >10x speedup!
 - [2025/09] [Sparse VideoGen2](https://arxiv.org/abs/2505.18875) is open-sourced! HunyuanVideo, Wan 2.1 and Cosmos can be accelerated by 2×
 - [2025/09] Sparse VideoGen2 is accepted by NeurIPS 2025 as a **spotlight**!
 - [2025/05] [Sparse VideoGen](https://arxiv.org/abs/2502.01776) is accepted by ICML 2025!
@@ -17,10 +18,17 @@ Accelerate Video Generation with High Pixel-level Fidelity
 - [2025/03] Sparse VideoGen is open-sourced! HunyuanVideo and CogVideoX v1.5 can be accelerated by 2×
 
 ## 📚 About
-Sparse VideoGen (SVG) is a **training-free framework** that leverages **inherent spatial and temporal sparsity** in the 3D Full Attention operations. Sparse VideoGen's core contributions include:
+Sparse VideoGen 1 & 2 are **training-free frameworks** that leverage **inherent sparsity** in the 3D Full Attention operations to accelerate video generation. 
+
+Sparse VideoGen 1's core contributions:
  - Identifying the **spatial and temporal sparsity patterns** in video diffusion models.
  - Proposing an **Online Profiling Strategy** to dynamically identify these patterns.
  - Implementing an end-to-end generation framework through **efficient algorithm-system co-design**, with **hardware-efficient layout transformation** and **customized kernels**.
+
+Sparse VideoGen 2's core contributions:
+ - Tackles **inaccurate token identification** and **computation waste** in video diffusion.
+ - Introduces **semantic-aware** sparse attention with efficient **token permutation**.
+ - Provides an end-to-end system design with a **dynamic attention** kernel and **flash k-means** kernel.
 
 ## 🎥 Demo of SVG1
 <div style="display: flex; gap: 10px;">
