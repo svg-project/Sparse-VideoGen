@@ -88,6 +88,8 @@ pip install --no-build-isolation --verbose --editable . # Block Sparse Attention
 pip install cuvs-cu12 --extra-index-url=https://pypi.nvidia.com # 
 ```
 
+You don’t need to install [flash-kmeans](https://github.com/svg-project/flash-kmeans) separately. A copy of flash-kmeans is included in Sparse VideoGen and is used by default.
+
 ## 🚀 Inference Examples
 ### Wan 2.1
 
