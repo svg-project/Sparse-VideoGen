@@ -6,7 +6,7 @@ Accelerate Video Generation with High Pixel-level Fidelity
 </h3>
 
 <p align="center">
-| <a href="https://svg-project.github.io/"><b>Website</b></a> | <a href="https://arxiv.org/abs/2502.01776"><b>SVG 1 Paper</b></a> | <a href="https://arxiv.org/abs/2502.01776"><b>SVG2 Paper</b></a> | <a href="https://x.com/HaochengXiUCB/status/1899953252327927911"><b>SVG 1 Twitter/X</b></a> | <a href="https://x.com/HaochengXiUCB/status/1971219731140182423"><b>SVG 2 Twitter/X</b></a> |
+| <a href="https://svg-project.github.io/"><b>Website</b></a> | <a href="https://arxiv.org/abs/2502.01776"><b>SVG 1 Paper</b></a> | <a href="https://arxiv.org/abs/2505.18875"><b>SVG2 Paper</b></a> | <a href="https://x.com/HaochengXiUCB/status/1899953252327927911"><b>SVG 1 Twitter/X</b></a> | <a href="https://x.com/HaochengXiUCB/status/1971219731140182423"><b>SVG 2 Twitter/X</b></a> |
 </p>
 
 ## 🔥News🔥
