@@ -453,7 +453,7 @@ def _cfg_keep(conf):
     BN = conf.kwargs["BLOCK_N"]
     BK = conf.kwargs["BLOCK_K"]
     # Avoid tiny tiles on many warps
-    if BN * BK < 32 * 32 and conf.num_warps > 4:
+    if BN * BK <= 32 * 32 and conf.num_warps > 4:
         return False
     return True
 
