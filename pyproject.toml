@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Sparse Video Generation Models"
 readme = "svg/README.md"
 requires-python = ">=3.8"
-license = "Apache"
+license = "Apache-2.0"
 authors = [{ name = "FirstIntelligence" }]
 dependencies = [
     "torch>=2.0.0",
