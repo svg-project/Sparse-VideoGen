@@ -5,6 +5,7 @@ import torch
 from ...logger import logger
 from ..utils import visualize_sparse_bsr
 from .attention import (
+    WanAttn_EARAttn_Processor,
     WanAttn_SAPAttn_Processor,
     WanAttn_SVGAttn_Processor2_0,
     prepare_flashinfer_attention,
@@ -169,6 +170,43 @@ def replace_wan_attention(
         for layer_idx, m in enumerate(pipe.transformer.blocks):
             if hasattr(m.attn1, "processor"):  # Check if processor exists
                 # Instantiate KMEANS_BLOCK processor with its specific parameters
+                current_processor = AttnModule(
+                    layer_idx=layer_idx,
+                )
+                m.attn1.set_processor(current_processor)
+    elif pattern == "EAR":
+
+        logger.info(
+            f"Configuring KMEANS_BLOCK attention with QC: {num_q_centroids}, KC: {num_k_centroids}, P: {top_p_kmeans}, min_kc_ratio: {min_kc_ratio}"
+        )
+
+        # Make dir and clear the logging file
+        if logging_file is not None:
+            os.makedirs(os.path.dirname(logging_file), exist_ok=True)
+            with open(logging_file, "w") as f:
+                f.write("")
+
+        AttnModule = WanAttn_EARAttn_Processor
+
+        AttnModule.first_layers_fp = first_layers_fp
+        AttnModule.first_times_fp = first_times_fp
+        AttnModule.logging_file = logging_file
+
+        AttnModule.context_length = context_length
+        AttnModule.num_frame = num_frame_patches
+        AttnModule.frame_size = frame_patches_one_frame
+
+        AttnModule.num_q_centroids = num_q_centroids
+        AttnModule.num_k_centroids = num_k_centroids
+        AttnModule.top_p_kmeans = top_p_kmeans
+        AttnModule.min_kc_ratio = min_kc_ratio
+        AttnModule.num_layers = num_layers
+        AttnModule.kmeans_iter_init = kmeans_iter_init
+        AttnModule.kmeans_iter_step = kmeans_iter_step
+        AttnModule.zero_step_kmeans_init = zero_step_kmeans_init
+
+        for layer_idx, m in enumerate(pipe.transformer.blocks):
+            if hasattr(m.attn1, "processor"):  # Check if processor exists
                 current_processor = AttnModule(
                     layer_idx=layer_idx,
                 )

@@ -6,10 +6,11 @@ Accelerate Video Generation with High Pixel-level Fidelity
 </h3>
 
 <p align="center">
-| <a href="https://svg-project.github.io/"><b>Website</b></a> | <a href="https://arxiv.org/abs/2502.01776"><b>SVG 1 Paper</b></a> | <a href="https://arxiv.org/abs/2505.18875"><b>SVG2 Paper</b></a> | <a href="https://x.com/HaochengXiUCB/status/1899953252327927911"><b>SVG 1 Twitter/X</b></a> | <a href="https://x.com/HaochengXiUCB/status/1971219731140182423"><b>SVG 2 Twitter/X</b></a> |
+| <a href="https://svg-project.github.io/"><b>Website</b></a> | <a href="https://arxiv.org/abs/2502.01776"><b>SVG 1 Paper</b></a> | <a href="https://arxiv.org/abs/2505.18875"><b>SVG2 Paper</b></a> | <a href="https://arxiv.org/abs/2603.08982"><b>SVG-EAR Paper</b></a> | <a href="https://x.com/HaochengXiUCB/status/1899953252327927911"><b>SVG 1 Twitter/X</b></a> | <a href="https://x.com/HaochengXiUCB/status/1971219731140182423"><b>SVG 2 Twitter/X</b></a> |
 </p>
 
 ## 🔥News🔥
+- [2026/06] [SVG-EAR](https://arxiv.org/abs/2603.08982) is accepted by ECCV 2026!
 - [2025/09] We release [Flash k-Means](https://github.com/svg-project/flash-kmeans), a batched K-Means clustering algorithm implemented with Triton that offers >10x speedup!
 - [2025/09] [Sparse VideoGen2](https://arxiv.org/abs/2505.18875) is open-sourced! HunyuanVideo, Wan 2.1 and Cosmos can be accelerated by 2×
 - [2025/09] Sparse VideoGen2 is accepted by NeurIPS 2025 as a **spotlight**!
@@ -18,7 +19,7 @@ Accelerate Video Generation with High Pixel-level Fidelity
 - [2025/03] Sparse VideoGen is open-sourced! HunyuanVideo and CogVideoX v1.5 can be accelerated by 2×
 
 ## 📚 About
-Sparse VideoGen 1 & 2 are **training-free frameworks** that leverage **inherent sparsity** in the 3D Full Attention operations to accelerate video generation. 
+Sparse VideoGen 1, 2, and EAR are **training-free frameworks** that leverage **inherent sparsity** in the 3D Full Attention operations to accelerate video generation.
 
 Sparse VideoGen 1's core contributions:
  - Identifying the **spatial and temporal sparsity patterns** in video diffusion models.
@@ -29,6 +30,10 @@ Sparse VideoGen 2's core contributions:
  - Tackles **inaccurate token identification** and **computation waste** in video diffusion.
  - Introduces **semantic-aware** sparse attention with efficient **token permutation**.
  - Provides an end-to-end system design with a **dynamic attention** kernel and **flash k-means** kernel.
+
+SVG-EAR's core contributions:
+ - Recovers skipped attention blocks with **parameter-free centroid compensation**.
+ - Introduces **error-aware routing** to compute high-error blocks exactly while compensating the rest.
 
 ## 🎥 Demo of SVG1
 <div style="display: flex; gap: 10px;">
@@ -53,6 +58,13 @@ Sparse VideoGen 2's core contributions:
     </td>
   </tr>
 </table>
+
+## 🎥 Demo of SVG-EAR
+<p align="center">
+  <img src="assets/video/svg_ear_dense_comparison.gif" width="32%"/>
+  <img src="assets/video/svg_ear_wan_t2v_comparison.gif" width="32%"/>
+  <img src="assets/video/svg_ear_methodology.gif" width="32%"/>
+</p>
 
 
 
@@ -105,10 +117,12 @@ We support Text-to-Video and Image-to-Video inference of Wan 2.1 model. The runn
 # Text-to-Video
 # bash scripts/wan/wan_t2v_720p_svg.sh # SVG
 bash scripts/wan/wan_t2v_720p_sap.sh # SVG2
+bash scripts/wan/wan_t2v_720p_ear.sh # SVG-EAR
 
 # Image-to-Video
 # bash scripts/wan/wan_i2v_720p_svg.sh # SVG
 bash scripts/wan/wan_i2v_720p_sap.sh # SVG2
+bash scripts/wan/wan_i2v_720p_ear.sh # SVG-EAR
 ```
 
 ### HunyuanVideo
@@ -117,11 +131,13 @@ The running scripts are:
 ```bash
 # bash scripts/hyvideo/hyvideo_t2v_720p_svg.sh # SVG
 bash scripts/hyvideo/hyvideo_t2v_720p_sap.sh # SVG2
+bash scripts/hyvideo/hyvideo_t2v_720p_ear.sh # SVG-EAR
 ```
 
 
 ## 📑 Open-source Plan
  - [ ] Support FP8 attention
+ - [x] Support [SVG-EAR](https://arxiv.org/abs/2603.08982)
  - [x] Support [Wan 2.1](https://github.com/Wan-Video/Wan2.1)
  - [x] Support [Cosmos](https://github.com/NVIDIA/Cosmos)
 
@@ -191,5 +207,13 @@ If you find Sparse VideoGen useful for your research and applications or interes
   author={Yang, Shuo and Xi, Haocheng and Zhao, Yilong and Li, Muyang and Zhang, Jintao and Cai, Han and Lin, Yujun and Li, Xiuyu and Xu, Chenfeng and Peng, Kelly and others},
   journal={arXiv preprint arXiv:2505.18875},
   year={2025}
+}
+
+@article{zhou2026svgear,
+  title={SVG-EAR: Parameter-Free Linear Compensation for Sparse Video Generation via Error-aware Routing},
+  author={Zhou, Xuanyi and Mang, Qiuyang and Yang, Shuo and Xi, Haocheng and Zhang, Jintao and Mao, Huanzhi and Gonzalez, Joseph E. and Keutzer, Kurt and Stoica, Ion and Cheung, Alvin},
+  journal={arXiv preprint arXiv:2603.08982},
+  year={2026},
+  note={Accepted to ECCV 2026}
 }
 ```

@@ -15,6 +15,9 @@ from ...kmeans_utils import (
     density_calculation,
     dynamic_block_sparse_fwd_flashinfer,
     identify_dynamic_map,
+    identify_dynamic_map_estimated,
+    scatter_mean_fused,
+    dynamic_block_sparse_prune_fwd_flashinfer,
 )
 from ...flashinfer_patch import flashinfer_patch_enabled
 from ...logger import logger
@@ -804,6 +807,112 @@ class Hunyuan_SAPAttn_Processor2_0(Hunyuan_SVGAttn_Processor2_0):
 
             return attn_output.reshape(cfg, num_heads, seq_len, dim)
 
+
+class Hunyuan_EARAttn_Processor(Hunyuan_SAPAttn_Processor2_0):
+
+    @time_logging_decorator("Level 3 - semantic aware permutation")
+    def semantic_aware_permutation(self, query, key, value, _timestep, layer_idx):
+        cfg, num_heads, seq_len, dim = query.size()
+
+        # 1. Kmeans clustering
+        qlabels, qcentroids, qcluster_sizes, _, klabels, kcentroids, kcluster_sizes, _ = self.kmeans_clustering(
+            query, key, layer_idx
+        )
+
+        # 2. Identify dynamic map
+        q_cluster_sizes = qcluster_sizes.view(cfg, num_heads, self.num_q_centroids)
+        k_cluster_sizes = kcluster_sizes.view(cfg, num_heads, self.num_k_centroids)
+
+        # 3. Permute the query, key, value
+        q_permuted, q_sorted_indices = permute_tensor_by_labels_triton(query, qlabels, dim=2)
+        k_permuted, k_sorted_indices = permute_tensor_by_labels_triton(key, klabels, dim=2)
+        v_permuted, _ = permute_tensor_by_labels_triton(value, klabels, dim=2, sorted_indices=k_sorted_indices)
+        vcentroids = scatter_mean_fused(v_permuted.view(cfg, num_heads, seq_len, dim), k_cluster_sizes.view(cfg, num_heads, self.num_k_centroids) )
+        return q_permuted, k_permuted, v_permuted, None, q_cluster_sizes, k_cluster_sizes, q_sorted_indices, \
+                qcentroids.view(cfg, num_heads, self.num_q_centroids, dim), \
+                kcentroids.view(cfg, num_heads, self.num_k_centroids, dim), \
+                vcentroids.view(cfg, num_heads, self.num_k_centroids, dim)
+
+    @time_logging_decorator("Level 2 - attention core logic")
+    def attention_core_logic(self, query, key, value, timestep, layer_idx, cu_max_seqlens):
+        cfg, num_heads, seq_len, dim = query.size()
+        assert cfg == 1, "Batch size must be 1 for kmeans block sparse attention"
+
+        prompt_length, context_length, num_frame, frame_size = (
+            self.prompt_length,
+            self.context_length,
+            self.num_frame,
+            self.frame_size,
+        )
+
+        assert (
+            seq_len == context_length + num_frame * frame_size
+        ), f"Query Shape: {seq_len} is not equivalent to {context_length} + {num_frame} * {frame_size}"
+
+        # Determine if we use Full Attention to calculate
+        full_attention_flag = False
+
+        if self.layer_idx < self.first_layers_fp:
+            full_attention_flag = True
+        if timestep[0] > self.first_times_fp:
+            full_attention_flag = True
+
+        if full_attention_flag:
+            if self.zero_step_kmeans_init:
+                video_length = self.num_frame * self.frame_size
+                query_video = query[:, :, :video_length, :].contiguous()
+                key_video = key[:, :, :video_length, :].contiguous()
+                self.kmeans_clustering(query_video, key_video, layer_idx)
+
+            output_hidden_states = self.flashinfer_attention(query, key, value, cu_max_seqlens)
+            return output_hidden_states.reshape(cfg, num_heads, seq_len, dim)
+        else:
+            video_length = num_frame * frame_size
+            unprompt_length = context_length - prompt_length
+
+            # 1. Video part
+            query_video, key_video, value_video, _ = self.prepare_video_part(query, key, value)
+
+            # Core logic
+            q_perm, k_perm, v_perm, _, qc_sz_s, kc_sz_s, q_sorted_indices, qcentroids, kcentroids, vcentroids = self.semantic_aware_permutation(
+                query_video, key_video, value_video, timestep, layer_idx
+            )
+
+            estimate_map = identify_dynamic_map_estimated(
+                q_perm, k_perm, v_perm, qc_sz_s, kc_sz_s,
+                qcentroids, kcentroids, vcentroids,
+                top_p=self.top_p_kmeans, gamma=1, min_kc_ratio=0.05
+            ).contiguous()
+
+            q_perm, k_perm, v_perm, estimate_map, qc_sz_s, kc_sz_s, q_sorted_indices = self.dynamic_map_post_processing(
+                q_perm, k_perm, v_perm, query, key, value, estimate_map, qc_sz_s, kc_sz_s, q_sorted_indices,
+                video_length, context_length, prompt_length, unprompt_length
+            )
+            kcentroids = F.pad(kcentroids, (0, 0, 0, 2), value=0)
+            vcentroids = F.pad(vcentroids, (0, 0, 0, 2), value=0)
+            output_permuted = dynamic_block_sparse_prune_fwd_flashinfer(
+                q_perm, k_perm, v_perm, kcentroids, vcentroids, estimate_map, qc_sz_s, kc_sz_s, is_cpu=False
+            )
+            attn_output = apply_inverse_permutation_triton(output_permuted, q_sorted_indices, dim=2)
+
+            # Save time, layer, density information to logging file
+            if self.logging_file is not None:
+                # Create log entry
+                densities = density_calculation(estimate_map, qc_sz_s, kc_sz_s) # Use estimate_map for logged density
+
+                avg_density = densities.mean().item()
+                log_entry = {
+                    "timestep": timestep[0].item(),
+                    "layer": layer_idx,
+                    "avg_density": avg_density,
+                    "density": densities.tolist(),
+                }
+
+                # Append to log file
+                with open(self.logging_file, "a") as f:
+                    f.write(json.dumps(log_entry) + "\n")
+
+            return attn_output.reshape(cfg, num_heads, seq_len, dim)
 
 def flashinfer_varlen_func(q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv):
     """

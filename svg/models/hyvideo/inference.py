@@ -4,6 +4,7 @@ import torch
 
 from ...logger import logger
 from .attention import (
+    Hunyuan_EARAttn_Processor,
     Hunyuan_SAPAttn_Processor2_0,
     Hunyuan_SVGAttn_Processor2_0,
     HunyuanVideoAttnProcessor2_0_FlashAttention,
@@ -160,6 +161,52 @@ def replace_hyvideo_attention(
             self_attn.processor = AttnModule(layer_idx=layer_idx + len(pipe.transformer.transformer_blocks))
             print(
                 f"Replaced Semantic Aware Permutation block for Single Stream Transformer at layer {layer_idx + len(pipe.transformer.transformer_blocks)}"
+            )
+    elif pattern in ["EAR"]:
+        # Pass K-means specific parameters to the processor's constructor or set them as attributes
+        # The processor itself will handle the K-means logic internally
+        logger.info(
+            f"Configuring KMEANS_BLOCK attention with QC: {num_q_centroids}, KC: {num_k_centroids}, P: {top_p_kmeans}, min_kc_ratio: {min_kc_ratio}"
+        )
+
+        # Make dir and clear the logging file
+        if logging_file is not None:
+            os.makedirs(os.path.dirname(logging_file), exist_ok=True)
+            with open(logging_file, "w") as f:
+                f.write("")
+
+        AttnModule = Hunyuan_EARAttn_Processor
+
+        AttnModule.first_layers_fp = first_layers_fp
+        AttnModule.first_times_fp = first_times_fp
+        AttnModule.logging_file = logging_file
+
+        # These might be needed by the processor if it has to adapt to sequence dimensions
+        AttnModule.prompt_length = prompt_length
+        AttnModule.context_length = context_length
+        AttnModule.num_frame = num_frame
+        AttnModule.frame_size = frame_size
+
+        AttnModule.num_q_centroids = num_q_centroids
+        AttnModule.num_k_centroids = num_k_centroids
+        AttnModule.top_p_kmeans = top_p_kmeans
+        AttnModule.min_kc_ratio = min_kc_ratio
+        AttnModule.kmeans_iter_init = kmeans_iter_init
+        AttnModule.kmeans_iter_step = kmeans_iter_step
+        AttnModule.zero_step_kmeans_init = zero_step_kmeans_init
+
+        replace_sparse_forward()
+
+        for layer_idx, m in enumerate(pipe.transformer.transformer_blocks):
+            self_attn = m.attn
+            self_attn.processor = AttnModule(layer_idx=layer_idx)
+            print(f"Replaced EAR block for Double Stream Transformer at layer {layer_idx}")
+
+        for layer_idx, m in enumerate(pipe.transformer.single_transformer_blocks):
+            self_attn = m.attn
+            self_attn.processor = AttnModule(layer_idx=layer_idx + len(pipe.transformer.transformer_blocks))
+            print(
+                f"Replaced EAR block for Single Stream Transformer at layer {layer_idx + len(pipe.transformer.transformer_blocks)}"
             )
 
     else:

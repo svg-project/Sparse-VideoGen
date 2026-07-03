@@ -18,8 +18,11 @@ from ...kernels.triton.rmsnorm import triton_rmsnorm_forward
 from ...kmeans_utils import (
     batch_kmeans_Euclid,
     density_calculation,
+    identify_dynamic_map_estimated,
     dynamic_block_sparse_fwd_flashinfer,
+    dynamic_block_sparse_prune_fwd_flashinfer,
     identify_dynamic_map,
+    scatter_mean_fused,
 )
 from ...logger import logger
 from ...timer import time_logging_decorator
@@ -320,7 +323,6 @@ class WanAttn_SVGAttn_Processor2_0:
 
             hidden_states = self.sparse_flex_attention(query_out, key_out, value_out, block_mask=self.block_mask)
             # hidden_states = self.sparse_flashinfer_attention(query_out, key_out, value_out, temporal_mask_metadata=self.temporal_mask_metadata)
-
             self.fast_hidden_states_placement(
                 hidden_states, output_hidden_states, best_mask_idx, context_length, num_frame, frame_size
             )
@@ -555,5 +557,89 @@ class WanAttn_SAPAttn_Processor(WanAttn_SVGAttn_Processor2_0):
 
                     with open(self.logging_file, "a") as f:
                         f.write(json.dumps(log_entry) + "\n")
+
+            return attn_output.reshape(cfg, num_heads, seq_len, dim)
+
+class WanAttn_EARAttn_Processor(WanAttn_SAPAttn_Processor):
+    min_k_ratio = 1
+    @time_logging_decorator("Level 3 - semantic aware permutation")
+    def semantic_aware_permutation(self, query, key, value):
+        cfg, num_heads, seq_len, dim = query.size()
+
+        # 1. Kmeans clustering
+        qlabels, qcentroids, qcluster_sizes, _, klabels, kcentroids, kcluster_sizes, _ = self.kmeans_clustering(
+            query, key, self.layer_idx
+        )
+        # 2. Identify dynamic map
+        q_cluster_sizes = qcluster_sizes.view(cfg, num_heads, self.num_q_centroids)
+        k_cluster_sizes = kcluster_sizes.view(cfg, num_heads, self.num_k_centroids)
+        # 3. Permute the query, key, value
+        q_permuted, q_sorted_indices = permute_tensor_by_labels_triton(query, qlabels, dim=2)
+        k_permuted, k_sorted_indices = permute_tensor_by_labels_triton(key, klabels, dim=2)
+        v_permuted, _ = permute_tensor_by_labels_triton(
+            value, klabels, dim=2, sorted_indices=k_sorted_indices
+        )
+        vcentroids = scatter_mean_fused(v_permuted.view(cfg, num_heads, seq_len, dim), k_cluster_sizes.view(cfg, num_heads, self.num_k_centroids))
+
+        return q_permuted, k_permuted, v_permuted, None, None, q_cluster_sizes, k_cluster_sizes, q_sorted_indices, \
+               qcentroids.view(cfg, num_heads, self.num_q_centroids, dim), kcentroids.view(cfg, num_heads, self.num_k_centroids, dim), vcentroids.view(cfg, num_heads, self.num_k_centroids, dim)
+
+    @time_logging_decorator("Level 2 - attention core logic")
+    def attention_core_logic(self, query, key, value, timestep):
+        cfg, num_heads, seq_len, dim = query.size()
+        assert cfg == 1, "Batch size must be 1 for kmeans block sparse attention"
+
+        context_length, num_frame, frame_size = self.context_length, self.num_frame, self.frame_size
+
+        assert (
+            seq_len == context_length + num_frame * frame_size
+        ), f"Query Shape: {seq_len} is not equivalent to {context_length} + {num_frame} * {frame_size}"
+
+        # Determine if we use Full Attention to calculate
+        full_attention_flag = False
+
+        if self.layer_idx < self.first_layers_fp:
+            full_attention_flag = True
+        if timestep[0] > self.first_times_fp:
+            full_attention_flag = True
+
+        if full_attention_flag:
+            if self.zero_step_kmeans_init:
+                video_length = self.num_frame * self.frame_size
+                query_video = query[:, :, :video_length, :].contiguous()
+                key_video = key[:, :, :video_length, :].contiguous()
+                self.kmeans_clustering(query_video, key_video, self.layer_idx)
+
+            output_hidden_states = self.flash_attention(query, key, value)
+            return output_hidden_states.reshape(cfg, num_heads, seq_len, dim)
+
+        else:
+
+            q_perm, k_perm, v_perm, _, _, qc_sz_s, kc_sz_s, q_sorted_indices, qcentroids, kcentroids, vcentroids = self.semantic_aware_permutation(
+                query, key, value
+            )
+
+            estimate_map = identify_dynamic_map_estimated(
+                q_perm, k_perm, v_perm, qc_sz_s, kc_sz_s,
+                qcentroids, kcentroids, vcentroids,
+                top_p=self.top_p_kmeans, gamma=1, min_kc_ratio=0.05
+            ).contiguous()
+
+            output_permuted = dynamic_block_sparse_prune_fwd_flashinfer(
+                q_perm, k_perm, v_perm, kcentroids, vcentroids,
+                estimate_map, qc_sz_s, kc_sz_s, is_cpu=False
+            )
+
+            attn_output = apply_inverse_permutation_triton(output_permuted, q_sorted_indices, dim=2)
+
+            if self.logging_file is not None:
+                log_entry = {
+                    "timestep": timestep[0].item(),
+                    "layer": self.layer_idx,
+                    "avg_density": density_calculation(estimate_map, qc_sz_s, kc_sz_s).mean().item(),
+                }
+
+                with open(self.logging_file, "a") as f:
+                    f.write(json.dumps(log_entry) + "\n")
 
             return attn_output.reshape(cfg, num_heads, seq_len, dim)

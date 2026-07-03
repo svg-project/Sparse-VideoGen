@@ -897,6 +897,471 @@ def identify_dynamic_map(
     return dynamic_map
 
 
+@triton.jit
+def _precompute_v_stats_kernel(
+    value_ptr,
+    value_centroids_ptr,
+    kc_offsets_ptr,
+    value_norm_sq_ptr,
+    centroid_value_dot_ptr,
+    centroid_value_sq_ptr,
+    kc_num,
+    num_heads,
+    D: tl.constexpr,
+    stride_vb,
+    stride_vh,
+    stride_vs,
+    stride_vd,
+    stride_vcb,
+    stride_vch,
+    stride_vckc,
+    stride_vcd,
+    stride_norm_b, stride_norm_h, stride_norm_s,
+    stride_vc_sq_b, stride_vc_sq_h, stride_vc_sq_kc,
+    BLOCK_S: tl.constexpr,
+):
+    # Grid layout:
+    # - axis 0: key-cluster index
+    # - axis 1: flattened (batch, head) index
+    pid_bh = tl.program_id(axis=1)
+    kc_idx = tl.program_id(axis=0)
+
+    batch_idx = pid_bh // num_heads
+    head_idx = pid_bh % num_heads
+
+    offset_base = pid_bh * (kc_num + 1)
+    token_start = tl.load(kc_offsets_ptr + offset_base + kc_idx)
+    token_end = tl.load(kc_offsets_ptr + offset_base + kc_idx + 1)
+
+    offs_d = tl.arange(0, D)
+    value_centroid = tl.load(
+        value_centroids_ptr
+        + batch_idx * stride_vcb
+        + head_idx * stride_vch
+        + kc_idx * stride_vckc
+        + offs_d * stride_vcd,
+        mask=offs_d < D,
+        other=0.0,
+    )
+
+    # Cache ||v_c||^2 once per key cluster so the main kernel only consumes scalars.
+    centroid_value_sq = tl.sum(value_centroid * value_centroid)
+    tl.store(
+        centroid_value_sq_ptr + batch_idx * stride_vc_sq_b + head_idx * stride_vc_sq_h + kc_idx,
+        centroid_value_sq,
+    )
+
+    offs_s = tl.arange(0, BLOCK_S)
+    for token_offset in range(token_start, token_end, BLOCK_S):
+        block_size = tl.minimum(BLOCK_S, token_end - token_offset)
+        token_mask = offs_s < block_size
+
+        value_block = tl.load(
+            value_ptr
+            + batch_idx * stride_vb
+            + head_idx * stride_vh
+            + (token_offset + offs_s)[:, None] * stride_vs
+            + offs_d[None, :] * stride_vd,
+            mask=token_mask[:, None] & (offs_d[None, :] < D),
+            other=0.0,
+        )
+
+        value_norm_sq = tl.sum(value_block * value_block, axis=1)
+        centroid_value_dot = tl.sum(value_centroid[None, :] * value_block, axis=1)
+
+        tl.store(
+            value_norm_sq_ptr + batch_idx * stride_norm_b + head_idx * stride_norm_h + token_offset + offs_s,
+            value_norm_sq,
+            mask=token_mask,
+        )
+        tl.store(
+            centroid_value_dot_ptr + batch_idx * stride_norm_b + head_idx * stride_norm_h + token_offset + offs_s,
+            centroid_value_dot,
+            mask=token_mask,
+        )
+
+
+@triton.jit
+def _error_estimation_kernel(
+    query_centroids_ptr,
+    key_tokens_ptr,
+    kc_offsets_ptr,
+    qc_sz_ptr,
+    kc_sz_ptr,
+    efficiency_scores_ptr,
+    value_norm_sq_ptr,
+    centroid_value_dot_ptr,
+    centroid_logits_ptr,
+    centroid_value_sq_ptr,
+    qc_num,
+    kc_num,
+    scale,
+    B,
+    num_heads,
+    gamma,
+    eps,
+    stride_qb,
+    stride_qh,
+    stride_qqc,
+    stride_qd,
+    stride_kb,
+    stride_kh,
+    stride_ks,
+    stride_kd,
+    stride_qc_sz_b, stride_qc_sz_h, stride_qc_sz_qc,
+    stride_kc_sz_b, stride_kc_sz_h, stride_kc_sz_kc,
+    stride_eb, stride_eh, stride_eqc, stride_ekc,
+    stride_norm_b, stride_norm_h, stride_norm_s,
+    stride_cb, stride_ch, stride_cqc, stride_ckc,
+    stride_vc_sq_b, stride_vc_sq_h, stride_vc_sq_kc,
+    BLOCK_SIZE_Q: tl.constexpr,
+    BLOCK_SIZE_K: tl.constexpr,
+    D: tl.constexpr,
+):
+    # Grid layout:
+    # - axis 0: query-cluster block
+    # - axis 1: flattened (batch, head) index
+    pid_bh = tl.program_id(axis=1)
+    pid_q_block = tl.program_id(axis=0)
+
+    batch_idx = pid_bh // num_heads
+    head_idx = pid_bh % num_heads
+
+    query_cluster_idx = pid_q_block * BLOCK_SIZE_Q + tl.arange(0, BLOCK_SIZE_Q)
+    query_cluster_mask = query_cluster_idx < qc_num
+
+    offs_d = tl.arange(0, D)
+    offs_k = tl.arange(0, BLOCK_SIZE_K)
+
+    query_centroids = tl.load(
+        query_centroids_ptr
+        + batch_idx * stride_qb
+        + head_idx * stride_qh
+        + query_cluster_idx[:, None] * stride_qqc
+        + offs_d[None, :] * stride_qd,
+        mask=query_cluster_mask[:, None],
+        other=0.0,
+    )
+
+    query_cluster_sizes = tl.load(
+        qc_sz_ptr
+        + batch_idx * stride_qc_sz_b
+        + head_idx * stride_qc_sz_h
+        + query_cluster_idx * stride_qc_sz_qc,
+        mask=query_cluster_mask,
+        other=0.0,
+    ).to(tl.float32)
+
+    offset_base = pid_bh * (kc_num + 1)
+    key_cluster_start = tl.load(kc_offsets_ptr + offset_base)
+    centroid_logits_base = (
+        centroid_logits_ptr
+        + batch_idx * stride_cb
+        + head_idx * stride_ch
+        + query_cluster_idx * stride_cqc
+    )
+
+    for kc_idx in range(kc_num):
+        key_cluster_end = tl.load(kc_offsets_ptr + offset_base + kc_idx + 1)
+
+        # All value-dependent terms are scalar loads from the precompute kernel.
+        centroid_logit = tl.load(
+            centroid_logits_base + kc_idx * stride_ckc,
+            mask=query_cluster_mask,
+            other=0.0,
+        ).to(tl.float32)
+        centroid_value_sq = tl.load(
+            centroid_value_sq_ptr + batch_idx * stride_vc_sq_b + head_idx * stride_vc_sq_h + kc_idx
+        )
+        key_cluster_size = tl.load(
+            kc_sz_ptr + batch_idx * stride_kc_sz_b + head_idx * stride_kc_sz_h + kc_idx
+        ).to(tl.float32)
+
+        running_max = centroid_logit
+        squared_sum = tl.zeros([BLOCK_SIZE_Q], dtype=tl.float32)
+        cross_sum = tl.zeros([BLOCK_SIZE_Q], dtype=tl.float32)
+
+        for token_offset in range(key_cluster_start, key_cluster_end, BLOCK_SIZE_K):
+            block_size = tl.minimum(BLOCK_SIZE_K, key_cluster_end - token_offset)
+            key_token_mask = offs_k < block_size
+
+            key_block = tl.load(
+                key_tokens_ptr
+                + batch_idx * stride_kb
+                + head_idx * stride_kh
+                + (token_offset + offs_k)[:, None] * stride_ks
+                + offs_d[None, :] * stride_kd,
+                mask=key_token_mask[:, None],
+                other=0.0,
+            )
+            value_norm_sq = tl.load(
+                value_norm_sq_ptr + batch_idx * stride_norm_b + head_idx * stride_norm_h + token_offset + offs_k,
+                mask=key_token_mask,
+                other=0.0,
+            )
+            centroid_value_dot = tl.load(
+                centroid_value_dot_ptr + batch_idx * stride_norm_b + head_idx * stride_norm_h + token_offset + offs_k,
+                mask=key_token_mask,
+                other=0.0,
+            )
+
+            attn = tl.dot(query_centroids, tl.trans(key_block)) * scale
+            attn = tl.where(
+                query_cluster_mask[:, None] & key_token_mask[None, :],
+                attn,
+                -float("inf"),
+            )
+
+            block_max = tl.max(attn, axis=1)
+            new_running_max = tl.maximum(running_max, block_max)
+
+            squared_rescale = tl.exp(2.0 * (running_max - new_running_max))
+            cross_rescale = tl.exp(running_max - new_running_max)
+
+            attn_prob = tl.exp(attn - new_running_max[:, None])
+            attn_prob = tl.where(
+                query_cluster_mask[:, None] & key_token_mask[None, :],
+                attn_prob,
+                0.0,
+            )
+
+            # Keep the online softmax update explicit: one term for ||A||^2 and one for <A, v_c>.
+            squared_sum = squared_sum * squared_rescale + tl.sum(attn_prob * attn_prob * value_norm_sq[None, :], axis=1)
+            cross_sum = cross_sum * cross_rescale + tl.sum(attn_prob * centroid_value_dot[None, :], axis=1)
+
+            running_max = new_running_max
+
+        centroid_prob = tl.exp(centroid_logit - running_max)
+        acc_error = squared_sum - 2.0 * centroid_prob * cross_sum
+        acc_error += (centroid_prob * centroid_prob) * centroid_value_sq * key_cluster_size
+        acc_error = acc_error * tl.exp(2.0 * running_max)
+        acc_error = tl.maximum(acc_error, eps)
+
+        block_area = tl.maximum(query_cluster_sizes * key_cluster_size, eps)
+        efficiency_scores = tl.log(acc_error) - gamma * tl.log(block_area)
+
+        tl.store(
+            efficiency_scores_ptr
+            + batch_idx * stride_eb
+            + head_idx * stride_eh
+            + query_cluster_idx * stride_eqc
+            + kc_idx * stride_ekc,
+            efficiency_scores,
+            mask=query_cluster_mask,
+        )
+
+        key_cluster_start = key_cluster_end
+
+
+def error_estimation_triton(
+    query_centroids: torch.Tensor,
+    key_centroids: torch.Tensor,
+    value_centroids: torch.Tensor,
+    permuted_K: torch.Tensor,
+    permuted_V: torch.Tensor,
+    qc_sz: torch.Tensor,
+    kc_sz: torch.Tensor,
+    c_logits: torch.Tensor,
+    gamma: float,
+    eps: float,
+    BLOCK_SIZE_Q: int = 64,
+    BLOCK_SIZE_K: int = 32,
+):
+    """Estimate log-efficiency scores for all `(query cluster, key cluster)` pairs.
+
+    The Triton path is split into two kernels:
+    1. Precompute value-side statistics that only depend on the key-cluster partition.
+    2. Reuse those statistics while scanning key tokens to estimate the block error.
+    """
+
+    B, H, qc_num, D = query_centroids.shape
+    kc_num = key_centroids.shape[2]
+    seq_len = permuted_K.shape[2]
+    device = query_centroids.device
+    scale = D ** -0.5
+
+    # Offsets map each key cluster to a contiguous token range in the permuted sequence.
+    kc_offsets = torch.zeros((B, H, kc_num + 1), device=device, dtype=torch.long)
+    torch.cumsum(kc_sz, dim=-1, out=kc_offsets[..., 1:])
+
+    value_norm_sq = torch.empty((B, H, seq_len), device=device, dtype=torch.float32)
+    centroid_value_dot = torch.empty((B, H, seq_len), device=device, dtype=torch.float32)
+    centroid_value_sq = torch.empty((B, H, kc_num), device=device, dtype=torch.float32)
+
+    precompute_grid = (kc_num, B * H)
+    _precompute_v_stats_kernel[precompute_grid](
+        permuted_V,
+        value_centroids,
+        kc_offsets,
+        value_norm_sq,
+        centroid_value_dot,
+        centroid_value_sq,
+        kc_num,
+        H,
+        D,
+        permuted_V.stride(0),
+        permuted_V.stride(1),
+        permuted_V.stride(2),
+        permuted_V.stride(3),
+        value_centroids.stride(0),
+        value_centroids.stride(1),
+        value_centroids.stride(2),
+        value_centroids.stride(3),
+        value_norm_sq.stride(0),
+        value_norm_sq.stride(1),
+        value_norm_sq.stride(2),
+        centroid_value_sq.stride(0),
+        centroid_value_sq.stride(1),
+        centroid_value_sq.stride(2),
+        BLOCK_S=64,
+        num_warps=4,
+    )
+
+    efficiency_scores = torch.empty((B, H, qc_num, kc_num), device=device, dtype=torch.float32)
+    grid = ((qc_num + BLOCK_SIZE_Q - 1) // BLOCK_SIZE_Q, B * H)
+
+    _error_estimation_kernel[grid](
+        query_centroids,
+        permuted_K,
+        kc_offsets,
+        qc_sz,
+        kc_sz,
+        efficiency_scores,
+        value_norm_sq,
+        centroid_value_dot,
+        c_logits,
+        centroid_value_sq,
+        qc_num,
+        kc_num,
+        scale,
+        B,
+        H,
+        gamma,
+        eps,
+        query_centroids.stride(0),
+        query_centroids.stride(1),
+        query_centroids.stride(2),
+        query_centroids.stride(3),
+        permuted_K.stride(0),
+        permuted_K.stride(1),
+        permuted_K.stride(2),
+        permuted_K.stride(3),
+        qc_sz.stride(0),
+        qc_sz.stride(1),
+        qc_sz.stride(2),
+        kc_sz.stride(0),
+        kc_sz.stride(1),
+        kc_sz.stride(2),
+        efficiency_scores.stride(0),
+        efficiency_scores.stride(1),
+        efficiency_scores.stride(2),
+        efficiency_scores.stride(3),
+        value_norm_sq.stride(0),
+        value_norm_sq.stride(1),
+        value_norm_sq.stride(2),
+        c_logits.stride(0),
+        c_logits.stride(1),
+        c_logits.stride(2),
+        c_logits.stride(3),
+        centroid_value_sq.stride(0),
+        centroid_value_sq.stride(1),
+        centroid_value_sq.stride(2),
+        BLOCK_SIZE_Q=BLOCK_SIZE_Q,
+        BLOCK_SIZE_K=BLOCK_SIZE_K,
+        D=D,
+        num_warps=4,
+    )
+
+    return efficiency_scores
+
+@torch.inference_mode()
+def identify_dynamic_map_estimated(
+    q_perm,
+    k_perm,
+    v_perm,
+    qc_sz,
+    kc_sz,
+    qcentroids,
+    kcentroids,
+    vcentroids,
+    top_p=0.9,
+    gamma=1.0,
+    min_kc_ratio=0.0,
+):
+    """Estimate the dynamic block map under a budget derived from centroid attention.
+
+    The selection happens in three stages:
+    1. Estimate an efficiency score for every `(query cluster, key cluster)` pair.
+    2. Derive a per-query-cluster area budget from centroid attention probabilities.
+    3. Keep the highest-efficiency blocks that fit within the remaining budget after
+       reserving the mandatory minimum key-cluster coverage.
+    """
+
+    B, H, _, D = q_perm.shape
+    device = q_perm.device
+    scale = D ** -0.5
+    eps = 1e-8
+
+    qc_num = qcentroids.shape[2]
+    kc_num = kcentroids.shape[2]
+
+    # Centroid logits are reused both for error estimation and for budget construction.
+    centroid_logits = torch.einsum("bhqd,bhkd->bhqk", qcentroids, kcentroids) * scale
+
+    efficiency_scores = error_estimation_triton(
+        qcentroids,
+        kcentroids,
+        vcentroids,
+        k_perm,
+        v_perm,
+        qc_sz,
+        kc_sz,
+        centroid_logits,
+        gamma,
+        eps,
+    )
+
+    block_area = (qc_sz.unsqueeze(-1) * kc_sz.unsqueeze(-2)).to(torch.float32)
+
+    # Approximate the reference top-p budget with centroid attention weighted by key-cluster size.
+    key_cluster_log_sizes = torch.log(kc_sz.to(qcentroids.dtype) + eps)
+    budget_logits = centroid_logits + key_cluster_log_sizes.unsqueeze(2)
+
+    budget_probs = torch.softmax(budget_logits, dim=-1)
+    sorted_budget_probs, budget_sorted_indices = torch.sort(budget_probs, dim=-1, descending=True)
+    cumulative_budget_probs = torch.cumsum(sorted_budget_probs, dim=-1)
+    budget_keep_mask = cumulative_budget_probs <= top_p
+    budget_keep_mask = F.pad(budget_keep_mask[..., :-1], (1, 0), value=True)
+
+    preserve_len = 0
+    if min_kc_ratio > 0:
+        preserve_len = max(1, int(min_kc_ratio * kc_num))
+        budget_preserve_len = max(1, int(min_kc_ratio * kc_num * 2))
+        budget_keep_mask[..., :budget_preserve_len] = True
+
+    sorted_block_area = torch.gather(block_area, -1, budget_sorted_indices)
+    budget_per_qc = (budget_keep_mask.to(block_area.dtype) * sorted_block_area).sum(dim=-1, keepdim=True)
+
+    # Reserve a minimum number of key clusters before ranking the remaining candidates.
+    guaranteed_mask = torch.zeros((B, H, qc_num, kc_num), dtype=torch.bool, device=device)
+    if preserve_len > 0:
+        guaranteed_mask.scatter_(-1, budget_sorted_indices[..., :preserve_len], True)
+
+    guaranteed_cost = (guaranteed_mask.to(block_area.dtype) * block_area).sum(dim=-1, keepdim=True)
+    remaining_budget = (budget_per_qc - guaranteed_cost).clamp_(min=0.0)
+
+    efficiency_scores.masked_fill_(guaranteed_mask, -1e10)
+
+    _, sorted_efficiency_indices = torch.sort(efficiency_scores, dim=-1, descending=True)
+    sorted_candidate_area = torch.gather(block_area, -1, sorted_efficiency_indices)
+    cumulative_candidate_cost = torch.cumsum(sorted_candidate_area, dim=-1)
+
+    dynamic_keep_mask = (cumulative_candidate_cost - sorted_candidate_area) < remaining_budget
+    dynamic_mask = torch.zeros_like(guaranteed_mask)
+    dynamic_mask.scatter_(-1, sorted_efficiency_indices, dynamic_keep_mask)
+
+    return guaranteed_mask | dynamic_mask
+
 # --- Functions from analyze/dynamic_block_sparse_attention.py ---
 
 
@@ -994,10 +1459,91 @@ def dynamic_block_sparse_fwd_torch(q, k, v, dynamic_map, qc_size, kc_size):
                 out[b, h, q_start:q_end, :] = acc_o_i / l_i.clamp(min=1e-12)  # Avoid division by zero
 
     return out
-
-
 # --- Triton Implementation ---
 
+@triton.jit
+def _scatter_mean_contiguous_kernel(
+    src_ptr, size_ptr, offsets_ptr, out_ptr,
+    C, H, L, D, K,
+    stride_src_c, stride_src_h, stride_src_l, stride_src_d,
+    stride_size_c, stride_size_h, stride_size_k,
+    stride_off_c, stride_off_h, stride_off_k,
+    stride_out_c, stride_out_h, stride_out_k, stride_out_d,
+    BLOCK_D: tl.constexpr,
+):
+    pid = tl.program_id(0)
+
+    k_idx = pid % K
+    bh_idx = pid // K
+    h_idx = bh_idx % H
+    c_idx = bh_idx // H
+
+    count_ptr = size_ptr + c_idx * stride_size_c + h_idx * stride_size_h + k_idx * stride_size_k
+    count = tl.load(count_ptr)
+
+    if count <= 0:
+        return
+
+    off_ptr = offsets_ptr + c_idx * stride_off_c + h_idx * stride_off_h + k_idx * stride_off_k
+    start_idx = tl.load(off_ptr)
+
+    cols = tl.arange(0, BLOCK_D)
+    d_mask = cols < D
+
+    src_ptr_base = (
+        src_ptr
+        + c_idx * stride_src_c
+        + h_idx * stride_src_h
+        + start_idx * stride_src_l
+        + cols * stride_src_d
+    )
+
+    acc = tl.zeros([BLOCK_D], dtype=tl.float32)
+
+    for i in range(count):
+        val = tl.load(src_ptr_base + i * stride_src_l, mask=d_mask, other=0.0)
+        acc += val
+
+    mean_val = acc / count
+
+    # Store result
+    out_ptr_final = (
+        out_ptr
+        + c_idx * stride_out_c
+        + h_idx * stride_out_h
+        + k_idx * stride_out_k
+        + cols * stride_out_d
+    )
+
+    tl.store(out_ptr_final, mean_val.to(out_ptr.dtype.element_ty), mask=d_mask)
+
+def scatter_mean_fused(src, size):
+    """
+    Args:
+        src: (cfg, num_heads, seq_len, dim) - Contiguous data
+        size: (cfg, num_heads, num_k_centroids) - Element count per label
+    """
+    C, H, L, D = src.shape
+    K = size.shape[-1]
+
+    offsets = torch.zeros_like(size)
+    offsets[..., 1:] = torch.cumsum(size[..., :-1], dim=-1)
+
+    out = torch.zeros((C, H, K, D), device=src.device, dtype=src.dtype)
+    # out = torch.empty((C, H, K, D), device=src.device, dtype=src.dtype)
+    BLOCK_D = triton.next_power_of_2(D)
+
+    grid = (C * H * K, )
+    _scatter_mean_contiguous_kernel[grid](
+        src, size, offsets, out,
+        C, H, L, D, K,
+        src.stride(0), src.stride(1), src.stride(2), src.stride(3),
+        size.stride(0), size.stride(1), size.stride(2),
+        offsets.stride(0), offsets.stride(1), offsets.stride(2),
+        out.stride(0), out.stride(1), out.stride(2), out.stride(3),
+        BLOCK_D=BLOCK_D
+    )
+    return out
 
 @triton.jit
 def _dynamic_block_sparse_fwd_kernel(
@@ -1202,6 +1748,148 @@ def _dynamic_block_sparse_fwd_kernel(
 
     # --- End of loop over Q chunks ---
 
+# def get_configs():
+#     configs = []
+#     for block_m in [16, 32, 64]:
+#         for block_n in [32, 64, 128]:
+#             for num_warps in [4, 8]:
+#                 for num_stages in [2, 3, 4]:
+#                     configs.append(triton.Config(
+#                         {'BLOCK_M': block_m, 'BLOCK_N': block_n},
+#                         num_warps=num_warps,
+#                         num_stages=num_stages
+#                     ))
+#     return configs
+
+# @triton.autotune(
+#     configs=get_configs(),
+#     key=['S', 'KC_NUM'],
+# )
+
+
+@triton.jit
+def _fused_qc_kernel_opt(
+    Q,
+    K_centroids,
+    V_centroids,
+    block_mask_map,
+    block_col_sz,
+    O_flash,
+    LSE_flash,
+    QC_INDPTR,
+    LSE_final,
+    Out,
+    stride_qh,
+    stride_qs,
+    stride_qd,
+    stride_ch,
+    stride_cn,
+    stride_cd,
+    stride_mb,
+    stride_mh,
+    stride_mq,
+    stride_mk,
+    stride_szb,
+    stride_szh,
+    stride_szn,
+    stride_ipb,
+    stride_iph,
+    stride_ipn,
+    sm_scale,
+    B,
+    H,
+    S,
+    D: tl.constexpr,
+    KC_NUM: tl.constexpr,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+):
+    # Each program handles one query cluster for one (batch, head) pair.
+    qc_idx = tl.program_id(0)
+    bh_idx = tl.program_id(1)
+    batch_idx = bh_idx // H
+    head_idx = bh_idx % H
+
+    # Query cluster boundaries are stored as an indptr array.
+    qc_indptr_ptr = QC_INDPTR + batch_idx * stride_ipb + head_idx * stride_iph + qc_idx * stride_ipn
+    start_s = tl.load(qc_indptr_ptr)
+    end_s = tl.load(qc_indptr_ptr + 1)
+
+    LN2 = 0.69314718056
+    offs_d = tl.arange(0, D)
+
+    # These bases point to the metadata and inputs for the current query cluster.
+    mask_base = block_mask_map + batch_idx * stride_mb + head_idx * stride_mh + qc_idx * stride_mq
+    size_base = block_col_sz + batch_idx * stride_szb + head_idx * stride_szh
+
+    q_base = Q + bh_idx * stride_qh
+    o_flash_base = O_flash + bh_idx * stride_qh
+    lse_flash_base = LSE_flash + bh_idx * S
+    k_centroids_base = K_centroids + bh_idx * stride_ch
+    v_centroids_base = V_centroids + bh_idx * stride_ch
+
+    for m_start in range(start_s, end_s, BLOCK_M):
+        # Process the current query cluster in BLOCK_M-sized chunks.
+        m_offsets = m_start + tl.arange(0, BLOCK_M)
+        m_mask = m_offsets < end_s
+
+        # FlashInfer returns logsumexp in log2 space, so convert it back to natural log space.
+        lse_f = tl.load(lse_flash_base + m_offsets, mask=m_mask, other=-float("inf"))
+        m_i = lse_f * LN2
+        l_i = tl.where(m_mask, 1.0, 0.0)
+
+        q_ptrs = q_base + m_offsets[:, None] * stride_qs + offs_d[None, :]
+        q = tl.load(q_ptrs, mask=m_mask[:, None], other=0.0)
+
+        # Initialize the accumulator from the token-level FlashInfer output.
+        acc_ptrs = o_flash_base + m_offsets[:, None] * stride_qs + offs_d[None, :]
+        acc = tl.load(acc_ptrs, mask=m_mask[:, None], other=0.0).to(tl.float32)
+
+        for n_start in range(0, KC_NUM, BLOCK_N):
+            # Iterate over centroid blocks and only keep entries with mask == 0.
+            n_offsets = n_start + tl.arange(0, BLOCK_N)
+            n_mask = n_offsets < KC_NUM
+
+            k_ptrs = k_centroids_base + n_offsets[:, None] * stride_cn + offs_d[None, :]
+            k = tl.load(k_ptrs, mask=n_mask[:, None], other=0.0)
+
+            scores = tl.dot(q, tl.trans(k)) * sm_scale
+
+            # Cluster sizes act as log-priors for centroid attention.
+            weights = tl.load(size_base + n_offsets * stride_szn, mask=n_mask, other=0.0)
+            scores += tl.math.log(weights[None, :] + 1e-6)
+
+            masks = tl.load(mask_base + n_offsets * stride_mk, mask=n_mask, other=1)
+            scores = tl.where((masks == 0)[None, :] & n_mask[None, :], scores, -float("inf"))
+
+            # Merge centroid attention with the existing FlashInfer statistics using stable softmax updates.
+            m_ij = tl.max(scores, axis=1)
+            m_next = tl.maximum(m_i, m_ij)
+
+            alpha = tl.math.exp(m_i - m_next)
+            p = tl.math.exp(scores - m_next[:, None])
+
+            l_tile = tl.sum(p, axis=1)
+            l_i_next = l_i * alpha + l_tile
+
+            v_ptrs = v_centroids_base + n_offsets[:, None] * stride_cn + offs_d[None, :]
+            v = tl.load(v_ptrs, mask=n_mask[:, None], other=0.0)
+
+            acc = acc * alpha[:, None] + tl.dot(p.to(v.dtype), v)
+
+            m_i = m_next
+            l_i = l_i_next
+
+        # Normalize the merged accumulator back to the final attention output.
+        out_final = acc / l_i[:, None]
+
+        tl.store(LSE_final + bh_idx * S + m_offsets, m_i + tl.math.log(l_i), mask=m_mask)
+        tl.store(
+            Out + bh_idx * stride_qh + m_offsets[:, None] * stride_qs + offs_d[None, :],
+            out_final.to(Out.dtype.element_ty),
+            mask=m_mask[:, None],
+        )
+
 
 def dynamic_block_sparse_fwd_triton(q, k, v, dynamic_map, qc_size, kc_size):
     """
@@ -1393,6 +2081,115 @@ def dynamic_block_sparse_fwd_flashinfer(
         o = o.reshape(B, H, S, D)
     return o
 
+@time_logging_decorator("Level 3 - dynamic block sparse fwd flashinfer on GPU")
+def dynamic_block_sparse_prune_fwd_flashinfer(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    k_centroids: torch.Tensor,
+    v_centroids: torch.Tensor,
+    block_mask_map: torch.Tensor,
+    block_row_sz: torch.Tensor,
+    block_col_sz: torch.Tensor,
+    is_cpu: bool = True,
+):
+    """Run token attention with FlashInfer, then fuse centroid attention with Triton."""
+    B, H, S, D = q.shape
+    qc_num, kc_num = block_mask_map.shape[-2:]
+    scale = D ** -0.5
+
+    assert block_mask_map.shape == (B, H, qc_num, kc_num)
+    assert (
+        all(t.device == torch.device("cpu") for t in [block_mask_map, block_row_sz, block_col_sz]) if is_cpu else True
+    )
+
+    # --- Part 1: FlashInfer for Tokens (Mask == 1) ---
+    with time_logging_decorator("Level 4 - Planning"):
+        float_workspace_buffer = torch.empty(128 * 1024 * 1024, device=q.device)
+        vector_sparse_indices_buffer = torch.empty(1024 * 1024 * 1024, device=q.device)
+
+        wrapper = flashinfer.sparse.VariableBlockSparseAttentionWrapper(float_workspace_buffer, backend="auto")
+
+        wrapper.reset_workspace_buffer(
+            float_workspace_buffer=wrapper._float_workspace_buffer,
+            int_workspace_buffer=wrapper._int_workspace_buffer,
+            vector_sparse_indices_buffer=vector_sparse_indices_buffer,
+            vector_sparse_indptr_buffer=wrapper._vector_sparse_indptr_buffer,
+        )
+
+        with flashinfer_patch_enabled():
+            wrapper.plan(
+                block_mask_map=block_mask_map.reshape(B * H, qc_num, kc_num),
+                block_row_sz=block_row_sz.reshape(B * H, qc_num),
+                block_col_sz=block_col_sz.reshape(B * H, kc_num),
+                num_qo_heads=B * H,
+                num_kv_heads=B * H,
+                head_dim=D,
+                q_data_type=q.dtype,
+                kv_data_type=k.dtype,
+            )
+
+    with time_logging_decorator("Level 4 - Running"):
+        o_flash, lse_flash = wrapper.run(
+            q.view(B * H, S, D),
+            k.view(B * H, S, D),
+            v.view(B * H, S, D),
+            return_lse=True,
+        )
+
+    # --- Part 2: Triton for Centroids (Mask == 0) ---
+    num_heads = B * H
+    qc_indptr = torch.zeros((B, H, qc_num + 1), device=q.device, dtype=torch.int32)
+    qc_indptr[..., 1:] = torch.cumsum(block_row_sz.to(q.device), dim=-1)
+
+    q_flat = q.view(num_heads, S, D)
+    k_centroids_flat = k_centroids.view(num_heads, kc_num, D)
+    v_centroids_flat = v_centroids.view(num_heads, kc_num, D)
+
+    o_final = torch.empty((num_heads, S, D), device=q.device, dtype=q.dtype)
+    lse_final = torch.empty((num_heads, S), device=q.device, dtype=torch.float32)
+    grid = (qc_num, num_heads)
+
+    _fused_qc_kernel_opt[grid](
+        Q=q_flat,
+        K_centroids=k_centroids_flat,
+        V_centroids=v_centroids_flat,
+        block_mask_map=block_mask_map,
+        block_col_sz=block_col_sz,
+        O_flash=o_flash,
+        LSE_flash=lse_flash,
+        QC_INDPTR=qc_indptr,
+        LSE_final=lse_final,
+        Out=o_final,
+        stride_qh=q_flat.stride(0),
+        stride_qs=q_flat.stride(1),
+        stride_qd=q_flat.stride(2),
+        stride_ch=k_centroids_flat.stride(0),
+        stride_cn=k_centroids_flat.stride(1),
+        stride_cd=k_centroids_flat.stride(2),
+        stride_mb=block_mask_map.stride(0),
+        stride_mh=block_mask_map.stride(1),
+        stride_mq=block_mask_map.stride(2),
+        stride_mk=block_mask_map.stride(3),
+        stride_szb=block_col_sz.stride(0),
+        stride_szh=block_col_sz.stride(1),
+        stride_szn=block_col_sz.stride(2),
+        stride_ipb=qc_indptr.stride(0),
+        stride_iph=qc_indptr.stride(1),
+        stride_ipn=qc_indptr.stride(2),
+        sm_scale=scale,
+        B=B,
+        H=H,
+        S=S,
+        D=D,
+        KC_NUM=kc_num,
+        BLOCK_M=128,
+        BLOCK_N=64,
+        num_warps=4,
+        num_stages=2,
+    )
+
+    return o_final.view(B, H, S, D)
 
 # ---------------- Batch wrapper for cuVS KMeans -----------------
 
@@ -1446,7 +2243,6 @@ def batch_kmeans_rapidai(x, n_clusters, max_iters=100, tol=1e-4, init_centroids=
         # n_iters_list.append(n_iter_b)
         # if verbose:
         #     print(f"Batch {b}: iters={n_iter_b}, cluster sizes min={cluster_sizes_b.min().item()} max={cluster_sizes_b.max().item()}")
-
     cluster_ids = torch.stack(cluster_ids_list, dim=0)  # (B,N)
     centroids = torch.stack(centroids_list, dim=0).to(x.dtype)  # (B,K,D)
     # cluster_sizes = torch.stack(cluster_sizes_list, dim=0)  # (B,K)
