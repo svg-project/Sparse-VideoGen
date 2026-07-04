@@ -35,7 +35,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=0, help="Random seed for generation")
     parser.add_argument("--skip_existing", action="store_true", help="Skip generating existing output files")
 
-    parser.add_argument("--pattern", type=str, default="dense", choices=["SVG", "dense", "SAP"])
+    parser.add_argument("--pattern", type=str, default="dense", choices=["SVG", "dense", "SAP", "EAR"])
     parser.add_argument("--first_layers_fp", type=float, default=0.025, help="Only works for best config. Leave the 0, 1, 2, 40, 41 layers in FP")
     parser.add_argument("--first_times_fp", type=float, default=0.075, help="Only works for best config. Leave the first 10% timestep in FP")
     
@@ -138,6 +138,23 @@ if __name__ == "__main__":
             first_times_fp=args.first_times_fp,
             pattern=args.pattern,
             # SAP specific
+            num_q_centroids=args.num_q_centroids,
+            num_k_centroids=args.num_k_centroids,
+            top_p_kmeans=args.top_p_kmeans,
+            min_kc_ratio=args.min_kc_ratio,
+            logging_file=args.logging_file,
+            kmeans_iter_init=args.kmeans_iter_init,
+            kmeans_iter_step=args.kmeans_iter_step,
+        )
+    elif args.pattern == "EAR":
+        replace_wan_attention(
+            pipe,
+            args.height,
+            args.width,
+            args.num_frames,
+            first_layers_fp=args.first_layers_fp,
+            first_times_fp=args.first_times_fp,
+            pattern=args.pattern,
             num_q_centroids=args.num_q_centroids,
             num_k_centroids=args.num_k_centroids,
             top_p_kmeans=args.top_p_kmeans,
